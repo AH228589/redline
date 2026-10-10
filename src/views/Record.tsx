@@ -1,0 +1,480 @@
+import { useEffect, useState } from 'preact/hooks'
+import { MapView, cssVar, type MapLine, type MapPoint } from '../components/MapView'
+import { Icon } from '../components/Icon'
+import { Sheet, SportIcon, Switch } from '../components/ui'
+import { beaconId, beaconLink, beaconViewers, startBeacon, stopBeacon } from '../lib/beacon'
+import { buildManual } from '../lib/importers'
+import * as rec from '../lib/recorder'
+import { back, go } from '../lib/router'
+import { correctElevation } from '../lib/routing'
+import { defaultName, SPORT_LIST, SPORTS, usesPace } from '../lib/sports'
+import { addActivity, buildActivity, gear, notify, replaceStreams, routes, settings, saveSettings } from '../lib/store'
+import type { Route, Sport, Streams } from '../lib/types'
+import { distNum, distUnit, fmtDist, fmtDuration, fmtPace, fmtSpeed, speedUnit } from '../lib/units'
+
+let sportPicked = false
+
+export function RecordView() {
+  const L = rec.live.value
+  const fix = rec.gps.value
+  const [wantBeacon, setWantBeacon] = useState(false)
+  const [pickRoute, setPickRoute] = useState(false)
+  const [pickSport, setPickSport] = useState(false)
+  const [finished, setFinished] = useState<{ streams: Streams | null; moving: number; started: number } | null>(null)
+  const [pending, setPending] = useState<rec.SavedRecording | null>(null)
+  const [, force] = useState(0)
+
+  useEffect(() => {
+    rec.startGps()
+    if (L.state === 'idle' && !sportPicked) {
+      rec.setSport(rec.lastSport())
+      sportPicked = true
+    }
+    rec.pendingRecording().then((r) => r && rec.live.value.state === 'idle' && setPending(r))
+    return () => rec.stopGps()
+  }, [])
+
+  // Redraw the track once a second while recording.
+  useEffect(() => {
+    if (L.state === 'idle') return
+    const t = setInterval(() => force((n) => n + 1), 2000)
+    return () => clearInterval(t)
+  }, [L.state])
+
+  const recording = L.state !== 'idle'
+  const route = rec.followedRoute()
+  const track = recording ? rec.trackLine() : []
+  const here: [number, number] | null = fix ? [fix.lon, fix.lat] : null
+  const lines: MapLine[] = []
+  if (route) lines.push({ id: 'route', coords: route.geometry, color: cssVar('--s1'), width: 5, opacity: 0.75 })
+  if (track.length > 1) lines.push({ id: 'track', coords: track, color: cssVar('--accent'), width: 5 })
+  const points: MapPoint[] = []
+  if (here) points.push({ id: 'me', coord: here, kind: 'me' })
+  if (track.length) points.push({ id: 'start', coord: track[0], kind: 'start' })
+
+  const acc = fix?.acc ?? null
+  const fresh = !!fix && Date.now() - fix.t < 30000
+  const gpsOk = fresh && acc! <= 25
+  const gpsWeak = fresh && acc! <= 50
+  const noGps = L.sport === 'workout'
+  const pace = usesPace(L.sport)
+
+  async function begin() {
+    if (wantBeacon) {
+      try {
+        const id = await startBeacon(settings.value.name || 'Redline athlete', SPORTS[L.sport].label, Date.now())
+        await shareLink(id)
+      } catch (e) {
+        notify(`Live sharing unavailable: ${(e as Error).message}`)
+      }
+    }
+    rec.start()
+  }
+
+  function end() {
+    const started = rec.live.value.startedAt ?? Date.now()
+    const { moving } = rec.timedSummary()
+    const streams = rec.finish()
+    if (beaconId.value) stopBeacon()
+    setFinished({ streams, moving, started })
+  }
+
+  return (
+    <div class="rec-screen">
+      <div class="rec-map">
+        {!noGps || recording ? (
+          <MapView lines={lines} points={points} follow={here} initialCenter={here ?? undefined} initialZoom={here ? 15 : 2} class="fill" fitTo={!recording && route ? route.geometry.map((c) => [c[0], c[1]] as [number, number]) : null} fitKey={route?.id}>
+            <div class="gps-pill">
+              {!recording && (
+                <button class="btn ghost icon sm" style={{ padding: '0.1rem', marginLeft: '-0.3rem' }} onClick={() => back('/')} aria-label="Close">
+                  <Icon name="x" size={1} />
+                </button>
+              )}
+              <span class="gps-dot" style={{ background: gpsOk ? 'var(--good)' : gpsWeak ? 'var(--warning)' : 'var(--critical)' }} />
+              {fresh ? (gpsOk ? `GPS ±${Math.round(acc!)} m` : `Weak GPS ±${Math.round(acc!)} m`) : rec.gpsError.value ? 'No GPS' : 'Finding GPS'}
+              {rec.hrNow.value != null && (
+                <span class="row" style={{ gap: '0.2rem', marginLeft: '0.3rem' }}>
+                  <Icon name="heart" size={0.85} style={{ color: 'var(--s8)' }} fill /> {rec.hrNow.value}
+                </span>
+              )}
+              {beaconId.value && (
+                <span class="row" style={{ gap: '0.2rem', marginLeft: '0.3rem' }} title="Live location sharing">
+                  <Icon name="wifi" size={0.9} /> {beaconViewers.value}
+                </span>
+              )}
+            </div>
+            {L.segment && (
+              <div class="live-banner">
+                <div class="row between">
+                  <div>
+                    <div class="tiny muted" style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Live segment</div>
+                    <div style={{ fontWeight: 700 }}>{L.segment.name}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div class="num" style={{ fontWeight: 700, fontSize: '1.3rem' }}>{fmtDuration(L.segment.elapsed)}</div>
+                    {L.segment.delta != null && (
+                      <div class="small num" style={{ fontWeight: 700, color: L.segment.delta <= 0 ? 'var(--good-ink)' : 'var(--critical)' }}>
+                        {L.segment.delta <= 0 ? '▲ ahead ' : '▼ behind '}
+                        {fmtDuration(Math.abs(L.segment.delta))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div class="progress" style={{ marginTop: '0.5rem' }}>
+                  <i style={{ width: `${Math.min(100, (L.segment.progress / L.segment.distance) * 100)}%` }} />
+                </div>
+              </div>
+            )}
+            {!L.segment && L.segmentDone && (
+              <div class="live-banner">
+                <div class="row">
+                  <Icon name="trophy" />
+                  <div class="grow">
+                    <b>{L.segmentDone.name}</b> {fmtDuration(L.segmentDone.elapsed)}
+                    <div class="small ink2">
+                      {L.segmentDone.isPr ? (L.segmentDone.pr ? 'New personal record!' : 'First effort recorded') : `${fmtDuration(L.segmentDone.elapsed - (L.segmentDone.pr ?? 0))} off your record`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {!L.segment && !L.segmentDone && L.route?.off && recording && (
+              <div class="live-banner" style={{ background: 'var(--critical)', color: '#fff' }}>
+                <b>Off route</b> by {Math.round(L.route.offBy)} m
+              </div>
+            )}
+          </MapView>
+        ) : (
+          <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: 'var(--muted)' }}>
+            <div style={{ textAlign: 'center' }}>
+              <Icon name="workout" size={3} />
+              <p>Timer only, no GPS needed</p>
+              <button class="btn sm" style={{ marginTop: '0.75rem' }} onClick={() => back('/')}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div class="rec-panel">
+        {pending && !recording && (
+          <div class="notice">
+            <Icon name="info" />
+            <div class="grow">
+              An unfinished recording from {new Date(pending.startedAt).toLocaleString()} was found.
+              <div class="row" style={{ marginTop: '0.5rem' }}>
+                <button
+                  class="btn sm primary"
+                  onClick={() => {
+                    rec.restore(pending)
+                    setPending(null)
+                  }}
+                >
+                  Resume it
+                </button>
+                <button
+                  class="btn sm"
+                  onClick={() => {
+                    rec.restore(pending)
+                    setPending(null)
+                    end()
+                  }}
+                >
+                  Save it
+                </button>
+                <button
+                  class="btn sm ghost"
+                  onClick={() => {
+                    rec.restore(pending)
+                    rec.finish()
+                    setPending(null)
+                  }}
+                >
+                  Discard
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {recording ? (
+          <>
+            {L.state !== 'recording' && <div class="state-pill">{L.state === 'autopaused' ? 'Auto-paused' : 'Paused'}</div>}
+            <div class="rec-stats">
+              <div class="main-stat">
+                <div class="value">{fmtDuration(L.moving)}</div>
+                <div class="label">Time</div>
+              </div>
+              {!noGps && (
+                <>
+                  <div>
+                    <div class="value">{distNum(L.distance).toFixed(2)}</div>
+                    <div class="label">{distUnit()}</div>
+                  </div>
+                  <div>
+                    <div class="value">{pace ? fmtPace(L.speed, false) : fmtSpeed(L.speed, false)}</div>
+                    <div class="label">{pace ? `Pace /${distUnit()}` : speedUnit()}</div>
+                  </div>
+                  <div>
+                    <div class="value">{L.hr ?? (pace ? fmtPace(L.avgSpeed, false) : fmtSpeed(L.avgSpeed, false))}</div>
+                    <div class="label">{L.hr != null ? 'bpm' : pace ? 'Avg pace' : 'Avg speed'}</div>
+                  </div>
+                </>
+              )}
+            </div>
+            {L.route && !L.route.off && <div class="small ink2" style={{ textAlign: 'center' }}>{fmtDist(L.route.remaining)} to go on {route?.name}</div>}
+            <div class="rec-controls">
+              {L.state === 'recording' || L.state === 'autopaused' ? (
+                <button class="round-btn secondary" onClick={rec.pause} aria-label="Pause">
+                  <Icon name="pause" size={1.75} fill />
+                </button>
+              ) : (
+                <>
+                  <button class="round-btn" onClick={rec.resume} aria-label="Resume">
+                    <Icon name="play" size={1.75} fill />
+                  </button>
+                  <button class="round-btn secondary" onClick={end} aria-label="Finish">
+                    <Icon name="stop" size={1.5} fill />
+                  </button>
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div class="row between">
+              <button class="btn" onClick={() => setPickSport(true)}>
+                <SportIcon sport={L.sport} /> {SPORTS[L.sport].label}
+              </button>
+              <button class="btn" onClick={() => setPickRoute(true)}>
+                <Icon name="route" /> {route ? route.name : 'Route'}
+              </button>
+            </div>
+            <div class="row between">
+              <button
+                class={`btn sm ${rec.hrDevice.value ? 'dark' : ''}`}
+                onClick={() =>
+                  rec.connectHr().catch((e) => {
+                    if ((e as Error).name !== 'NotFoundError') notify((e as Error).message)
+                  })
+                }
+              >
+                <Icon name="heart" size={1} /> {rec.hrDevice.value ?? 'Heart rate'}
+              </button>
+              <label class="row small" style={{ gap: '0.5rem' }}>
+                Share live location
+                <Switch on={wantBeacon} onChange={setWantBeacon} label="Share live location" />
+              </label>
+            </div>
+            <div class="rec-controls">
+              <button class="round-btn" style={{ width: '5.5rem', height: '5.5rem' }} onClick={begin} disabled={!noGps && !gpsWeak} aria-label="Start">
+                <span style={{ fontWeight: 800, letterSpacing: '0.04em' }}>START</span>
+              </button>
+            </div>
+            {!noGps && !gpsWeak && <div class="small muted" style={{ textAlign: 'center' }}>{rec.gpsError.value ?? 'Waiting for a GPS fix. Head outside with a clear view of the sky.'}</div>}
+            <div class="tiny muted" style={{ textAlign: 'center' }}>
+              Keep this screen open while recording. Phones pause web apps in the background, so the screen is kept awake for you.
+            </div>
+          </>
+        )}
+      </div>
+
+      {pickSport && (
+        <Sheet title="Choose sport" onClose={() => setPickSport(false)}>
+          <div class="grid2" style={{ gridTemplateColumns: '1fr 1fr' }}>
+            {SPORT_LIST.map((s) => (
+              <button
+                key={s}
+                class={`btn ${s === L.sport ? 'dark' : ''}`}
+                style={{ justifyContent: 'flex-start', borderRadius: 'var(--radius-sm)' }}
+                onClick={() => {
+                  rec.setSport(s)
+                  setPickSport(false)
+                }}
+              >
+                <SportIcon sport={s} /> {SPORTS[s].label}
+              </button>
+            ))}
+          </div>
+          <label class="row between" style={{ marginTop: '1.25rem' }}>
+            <span>Voice cues every {distUnit()}</span>
+            <Switch on={settings.value.voiceCues} onChange={(v) => saveSettings({ voiceCues: v })} label="Voice cues" />
+          </label>
+          <label class="row between" style={{ marginTop: '0.75rem' }}>
+            <span>Auto-pause when stopped</span>
+            <Switch on={settings.value.autoPause} onChange={(v) => saveSettings({ autoPause: v })} label="Auto-pause" />
+          </label>
+        </Sheet>
+      )}
+
+      {pickRoute && (
+        <Sheet title="Follow a route" onClose={() => setPickRoute(false)}>
+          {routes.value.length === 0 ? (
+            <div class="col">
+              <p class="ink2">No saved routes yet.</p>
+              <a class="btn primary" href="#/route/new">
+                Build a route
+              </a>
+            </div>
+          ) : (
+            <div>
+              {route && (
+                <button
+                  class="btn block"
+                  style={{ marginBottom: '0.75rem' }}
+                  onClick={() => {
+                    rec.followRoute(null)
+                    setPickRoute(false)
+                  }}
+                >
+                  Stop following {route.name}
+                </button>
+              )}
+              {routes.value.map((r: Route) => (
+                <button
+                  key={r.id}
+                  class="list-row"
+                  style={{ width: '100%', background: 'none', border: 0, borderBottom: '0.0625rem solid var(--line)', textAlign: 'left' }}
+                  onClick={() => {
+                    rec.followRoute(r)
+                    setPickRoute(false)
+                  }}
+                >
+                  <Icon name="route" />
+                  <div class="grow">
+                    <div style={{ fontWeight: 650 }}>{r.name}</div>
+                    <div class="small muted">{fmtDist(r.distance)}</div>
+                  </div>
+                  {route?.id === r.id && <Icon name="check" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </Sheet>
+      )}
+
+      {finished && <SaveSheet data={finished} sport={L.sport} onDone={() => setFinished(null)} />}
+    </div>
+  )
+}
+
+async function shareLink(id: string) {
+  const url = beaconLink(id)
+  try {
+    if (navigator.share) await navigator.share({ title: 'Follow my activity live', url })
+    else {
+      await navigator.clipboard.writeText(url)
+      notify('Live link copied to clipboard')
+    }
+  } catch {
+    try {
+      await navigator.clipboard.writeText(url)
+      notify('Live link copied to clipboard')
+    } catch {
+      notify(url)
+    }
+  }
+}
+
+function SaveSheet({ data, sport: initialSport, onDone }: { data: { streams: Streams | null; moving: number; started: number }; sport: Sport; onDone: () => void }) {
+  const [sport, setSport] = useState<Sport>(initialSport)
+  const [name, setName] = useState(defaultName(initialSport, data.started))
+  const [desc, setDesc] = useState('')
+  const [rpe, setRpe] = useState(0)
+  const [gearId, setGearId] = useState(gear.value.find((g) => !g.retired && g.defaultFor.includes(initialSport))?.id ?? '')
+  const [saving, setSaving] = useState(false)
+  const s = data.streams
+
+  async function save() {
+    setSaving(true)
+    let id: string
+    if (s && s.dist[s.dist.length - 1] > 20) {
+      const act = buildActivity(s, sport, name.trim() || defaultName(sport, data.started), { description: desc, rpe: rpe || null, gearId: gearId || null, source: 'recorded' })
+      await addActivity(act, s)
+      id = act.id
+      // Phone altitude is noisy; swap in terrain elevation when online.
+      if (s.lat && navigator.onLine)
+        correctElevation(s)
+          .then((ele) => replaceStreams(id, { ...s, ele }))
+          .catch(() => {})
+    } else {
+      const act = buildManual({ sport, name: name.trim() || defaultName(sport, data.started), start: data.started, time: data.moving, distance: s ? s.dist[s.dist.length - 1] : 0, gain: 0, rpe: rpe || null, description: desc })
+      await addActivity(act, null)
+      id = act.id
+    }
+    notify('Activity saved')
+    onDone()
+    go(`/activity/${id}`, true)
+  }
+
+  return (
+    <Sheet
+      title="Save activity"
+      onClose={() => {
+        if (confirm('Discard this activity?')) onDone()
+      }}
+    >
+      <div class="col">
+        <div class="stats">
+          <div class="stat">
+            <div class="label">Time</div>
+            <div class="value">{fmtDuration(data.moving)}</div>
+          </div>
+          {s && (
+            <div class="stat">
+              <div class="label">Distance</div>
+              <div class="value">{fmtDist(s.dist[s.dist.length - 1])}</div>
+            </div>
+          )}
+        </div>
+        <label class="field">
+          <span>Title</span>
+          <input class="input" value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+        </label>
+        <label class="field">
+          <span>Sport</span>
+          <select class="input" value={sport} onChange={(e) => setSport((e.target as HTMLSelectElement).value as Sport)}>
+            {SPORT_LIST.map((k) => (
+              <option key={k} value={k}>
+                {SPORTS[k].label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label class="field">
+          <span>How did it go?</span>
+          <textarea class="input" value={desc} onInput={(e) => setDesc((e.target as HTMLTextAreaElement).value)} />
+        </label>
+        <label class="field">
+          <span>Perceived effort: {rpe ? `${rpe} / 10` : 'not set'}</span>
+          <input type="range" min={0} max={10} value={rpe} onInput={(e) => setRpe(+(e.target as HTMLInputElement).value)} />
+        </label>
+        {gear.value.some((g) => !g.retired) && (
+          <label class="field">
+            <span>Gear</span>
+            <select class="input" value={gearId} onChange={(e) => setGearId((e.target as HTMLSelectElement).value)}>
+              <option value="">None</option>
+              {gear.value.filter((g) => !g.retired).map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <button class="btn primary lg block" disabled={saving} onClick={save}>
+          Save activity
+        </button>
+        <button
+          class="btn ghost block danger"
+          onClick={() => {
+            if (confirm('Discard this activity?')) onDone()
+          }}
+        >
+          Discard
+        </button>
+      </div>
+    </Sheet>
+  )
+}

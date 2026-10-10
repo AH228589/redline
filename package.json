@@ -1,0 +1,25 @@
+{
+  "name": "redline",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@garmin/fitsdk": "^21.218.0",
+    "@preact/signals": "^2.11.3",
+    "fflate": "^0.8.3",
+    "maplibre-gl": "^6.13.0",
+    "peerjs": "^1.5.5",
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^24.13.3",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}
