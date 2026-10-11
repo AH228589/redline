@@ -14,6 +14,13 @@ xcrun simctl privacy "$UDID" grant motion dev.ahristov.redline || true
 xcrun simctl location "$UDID" start --speed=3 --interval=1 \
   42.6865,23.342 42.6800,23.353 42.6745,23.360 42.6705,23.350 42.6865,23.342
 xcrun simctl launch --console-pty --terminate-running-process "$UDID" dev.ahristov.redline > out/console.log 2>&1 &
+if [ "${VITE_AUTOTEST_QUICK:-0}" = "1" ]; then
+  sleep 45
+  xcrun simctl io "$UDID" screenshot out/1-record.png
+  grep "\[AUTOTEST\]" out/console.log | tail -20
+  grep -q '\[AUTOTEST\] result {"ok":true' out/console.log
+  exit $?
+fi
 sleep 50
 xcrun simctl io "$UDID" screenshot out/1-recording.png
 echo "== sending Redline to the background"

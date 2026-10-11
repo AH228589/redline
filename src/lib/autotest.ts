@@ -13,9 +13,62 @@ async function until(cond: () => boolean, ms: number) {
   return cond()
 }
 
+/** Which ways of starting a web worker work in this WebView, and how the map worker file is served. */
+async function workerDiagnostics() {
+  const out: Record<string, unknown> = { origin: location.origin, href: location.href, secure: isSecureContext }
+  const tryWorker = (label: string, make: () => Worker) =>
+    new Promise<void>((resolve) => {
+      let w: Worker | null = null
+      const done = (v: unknown) => {
+        out[label] = v
+        w?.terminate()
+        resolve()
+      }
+      try {
+        w = make()
+        w.onmessage = (e) => done(`ok:${e.data}`)
+        w.onerror = (e) => done(`error:${(e as ErrorEvent).message || 'unknown'}`)
+        setTimeout(() => done('timeout'), 4000)
+      } catch (e) {
+        done(`throw:${String(e)}`)
+      }
+    })
+  const code = 'self.postMessage("hi")'
+  const blob = (type: string) => URL.createObjectURL(new Blob([code], { type }))
+  await tryWorker('classicBlob', () => new Worker(blob('text/javascript')))
+  await tryWorker('moduleBlob', () => new Worker(blob('text/javascript'), { type: 'module' }))
+  const { default: workerUrl } = await import('maplibre-gl/dist/maplibre-gl-worker.mjs?url')
+  out.workerUrl = workerUrl
+  try {
+    const r = await fetch(workerUrl)
+    const text = await r.text()
+    out.fetch = { status: r.status, type: r.headers.get('content-type'), bytes: text.length, head: text.slice(0, 60) }
+    const big = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }))
+    await tryWorker('mapWorkerBlob', () => new Worker(big, { type: 'module' }))
+  } catch (e) {
+    out.fetch = `throw:${String(e)}`
+  }
+  await tryWorker('mapWorkerDirect', () => new Worker(workerUrl, { type: 'module' }))
+  log('workers', out)
+}
+
 export async function runAutotest() {
   const duration = Number(import.meta.env.VITE_AUTOTEST_SECONDS || 240) * 1000
   await until(() => ready.value, 20000)
+  await workerDiagnostics().catch((e) => log('workers', { error: String(e) }))
+  if (import.meta.env.VITE_AUTOTEST_QUICK === '1') {
+    // Quick mode: open the record screen, check the map, stop.
+    go('/record')
+    await sleep(25000)
+    const m = (window as unknown as { __map?: { loaded(): boolean; areTilesLoaded(): boolean; isStyleLoaded(): boolean; queryRenderedFeatures(): unknown[]; getZoom(): number } }).__map
+    try {
+      log('map', m ? { loaded: m.loaded(), style: m.isStyleLoaded(), tiles: m.areTilesLoaded(), features: m.queryRenderedFeatures().length, zoom: +m.getZoom().toFixed(1) } : { none: true })
+    } catch (e) {
+      log('map', { error: String(e) })
+    }
+    log('result', { ok: true, quick: true })
+    return
+  }
   log('boot', { ua: navigator.userAgent, state: rec.live.value.state })
   if (activities.value.some((a) => a.name === 'Autotest run')) {
     log('done already')

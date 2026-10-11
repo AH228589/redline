@@ -10,10 +10,15 @@ on:
         type: choice
         options: [both, ios, android]
         default: both
+      quick:
+        description: Quick check (map and workers only, no background run)
+        type: boolean
+        default: false
 
 env:
   VITE_AUTOTEST: '1'
   VITE_AUTOTEST_SECONDS: '240'
+  VITE_AUTOTEST_QUICK: ${{ inputs.quick && '1' || '0' }}
 
 jobs:
   ios:
