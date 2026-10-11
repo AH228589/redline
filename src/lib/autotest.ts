@@ -33,6 +33,7 @@ async function workerDiagnostics() {
         done(`throw:${String(e)}`)
       }
     })
+  out.sincePageLoadMs = Math.round(performance.now())
   const code = 'self.postMessage("hi")'
   const blob = (type: string) => URL.createObjectURL(new Blob([code], { type }))
   await tryWorker('classicBlob', () => new Worker(blob('text/javascript')))
