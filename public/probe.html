@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Worker probe</title>
+<meta name="robots" content="noindex" />
+<style>
+  body { font: 1.1rem/1.5 system-ui, sans-serif; margin: 1rem; background: #fff; color: #000; }
+  b { display: inline-block; min-width: 9rem; }
+  .ok { color: #006300; } .bad { color: #b00020; }
+</style>
+</head>
+<body>
+<h3>Worker probe</h3>
+<div id="out">running...</div>
+<script>
+// Diagnostic page used by the device tests: which kinds of web worker start here.
+const out = document.getElementById('out')
+const rows = []
+const show = () => (out.innerHTML = rows.map(([k, v]) => `<div><b>${k}</b> <span class="${String(v).startsWith('ok') ? 'ok' : 'bad'}">${v}</span></div>`).join(''))
+const code = 'self.postMessage("hi")'
+const tryWorker = (label, make) => new Promise((resolve) => {
+  let w = null
+  const done = (v) => { rows.push([label, v]); show(); try { w && w.terminate() } catch {} ; resolve() }
+  try {
+    w = make()
+    w.onmessage = (e) => done('ok ' + e.data)
+    w.onerror = (e) => done('error ' + (e.message || ''))
+    setTimeout(() => done('timeout'), 8000)
+  } catch (e) { done('throw ' + e) }
+})
+const blob = () => URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))
+;(async () => {
+  rows.push(['ua', navigator.userAgent.slice(0, 60)])
+  await tryWorker('classic blob', () => new Worker(blob()))
+  await tryWorker('module blob', () => new Worker(blob(), { type: 'module' }))
+  await tryWorker('js file', () => new Worker('/worker-probe.js'))
+  await tryWorker('module file', () => new Worker('/worker-probe.js', { type: 'module' }))
+  rows.push(['done', 'ok']); show()
+})()
+</script>
+</body>
+</html>

@@ -26,6 +26,13 @@ done
 if [ "${VITE_AUTOTEST_QUICK:-0}" = "1" ]; then
   sleep 45
   xcrun simctl io "$UDID" screenshot out/1-record.png
+  # Same probes in the simulator's own Safari, to tell app issues from simulator issues.
+  xcrun simctl openurl "$UDID" "https://redline-two-mu.vercel.app/probe.html?t=$(date +%s)" || true
+  sleep 30
+  xcrun simctl io "$UDID" screenshot out/2-safari-probe.png
+  xcrun simctl openurl "$UDID" "https://redline-two-mu.vercel.app/#/route/new" || true
+  sleep 35
+  xcrun simctl io "$UDID" screenshot out/3-safari-map.png
   grep "\[AUTOTEST\]" out/console.log | tail -20
   grep -q '\[AUTOTEST\] result {"ok":true' out/console.log
   exit $?
