@@ -38,6 +38,7 @@ const blob = () => URL.createObjectURL(new Blob([code], { type: 'text/javascript
   await tryWorker('js file', () => new Worker('/worker-probe.js'))
   await tryWorker('module file', () => new Worker('/worker-probe.js', { type: 'module' }))
   rows.push(['done', 'ok']); show()
+  console.log('[PROBE] ' + JSON.stringify(Object.fromEntries(rows)))
 })()
 </script>
 </body>

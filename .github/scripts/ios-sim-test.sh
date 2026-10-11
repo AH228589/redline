@@ -27,12 +27,24 @@ if [ "${VITE_AUTOTEST_QUICK:-0}" = "1" ]; then
   sleep 45
   xcrun simctl io "$UDID" screenshot out/1-record.png
   # Same probes in the simulator's own Safari, to tell app issues from simulator issues.
-  xcrun simctl openurl "$UDID" "https://redline-two-mu.vercel.app/probe.html?t=$(date +%s)" || true
-  sleep 30
+  # Open twice: the first open can be covered by Safari's first-run screen.
+  xcrun simctl openurl "$UDID" "https://redline-two-mu.vercel.app/probe.html?t=1" || true
+  sleep 15
+  xcrun simctl openurl "$UDID" "https://redline-two-mu.vercel.app/probe.html?t=2" || true
+  sleep 25
   xcrun simctl io "$UDID" screenshot out/2-safari-probe.png
   xcrun simctl openurl "$UDID" "https://redline-two-mu.vercel.app/#/route/new" || true
   sleep 35
   xcrun simctl io "$UDID" screenshot out/3-safari-map.png
+  # The app itself, but loading the probe over https instead of capacitor://
+  CAP_SERVER_URL="https://redline-two-mu.vercel.app/probe.html" npx cap sync ios > /dev/null
+  xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -destination "id=$UDID" -derivedDataPath build/sim CODE_SIGNING_ALLOWED=NO build -quiet
+  xcrun simctl terminate "$UDID" dev.ahristov.redline || true
+  xcrun simctl install "$UDID" "$APP"
+  xcrun simctl launch --console-pty "$UDID" dev.ahristov.redline > out/console-remote.log 2>&1 &
+  sleep 45
+  xcrun simctl io "$UDID" screenshot out/4-app-https-probe.png
+  echo "== app over https:"; grep "PROBE\|WebView" out/console-remote.log | head -5
   grep "\[AUTOTEST\]" out/console.log | tail -20
   grep -q '\[AUTOTEST\] result {"ok":true' out/console.log
   exit $?
