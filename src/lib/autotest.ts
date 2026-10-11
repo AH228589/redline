@@ -28,7 +28,7 @@ async function workerDiagnostics() {
         w = make()
         w.onmessage = (e) => done(`ok:${e.data}`)
         w.onerror = (e) => done(`error:${(e as ErrorEvent).message || 'unknown'}`)
-        setTimeout(() => done('timeout'), 4000)
+        setTimeout(() => done('timeout'), 8000)
       } catch (e) {
         done(`throw:${String(e)}`)
       }
@@ -37,6 +37,9 @@ async function workerDiagnostics() {
   const blob = (type: string) => URL.createObjectURL(new Blob([code], { type }))
   await tryWorker('classicBlob', () => new Worker(blob('text/javascript')))
   await tryWorker('moduleBlob', () => new Worker(blob('text/javascript'), { type: 'module' }))
+  await tryWorker('dataUrl', () => new Worker(`data:text/javascript,${encodeURIComponent(code)}`))
+  await tryWorker('jsFile', () => new Worker('/worker-probe.js'))
+  out.workerType = typeof Worker
   const { default: workerUrl } = await import('maplibre-gl/dist/maplibre-gl-worker.mjs?url')
   out.workerUrl = workerUrl
   try {
