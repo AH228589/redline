@@ -13,7 +13,16 @@ xcrun simctl privacy "$UDID" grant motion dev.ahristov.redline || true
 # A loop through Borisova Gradina park in Sofia at running speed.
 xcrun simctl location "$UDID" start --speed=3 --interval=1 \
   42.6865,23.342 42.6800,23.353 42.6745,23.360 42.6705,23.350 42.6865,23.342
-xcrun simctl launch --console-pty --terminate-running-process "$UDID" dev.ahristov.redline > out/console.log 2>&1 &
+# Simulator boots on CI can report ready before SpringBoard is; give it time and
+# retry the launch until the app's WebView has actually loaded.
+sleep 20
+for attempt in 1 2 3; do
+  xcrun simctl launch --console-pty --terminate-running-process "$UDID" dev.ahristov.redline > out/console.log 2>&1 &
+  for i in $(seq 1 30); do grep -q "WebView loaded" out/console.log && break; sleep 2; done
+  grep -q "WebView loaded" out/console.log && break
+  echo "== launch attempt $attempt did not load, retrying"; cat out/console.log | head -5
+  sleep 10
+done
 if [ "${VITE_AUTOTEST_QUICK:-0}" = "1" ]; then
   sleep 45
   xcrun simctl io "$UDID" screenshot out/1-record.png
