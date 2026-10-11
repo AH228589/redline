@@ -26,6 +26,8 @@ export interface Streams {
   pwr: number[] | null
   dist: number[] // cumulative metres
   est?: [number, number][] | null // index ranges filled in by routing, not measured
+  cadUnit?: 'spm' // cadence already in steps per minute (phone recordings)
+  eleSource?: 'gps' | 'baro' // where recorded elevation came from
 }
 
 export interface Split {

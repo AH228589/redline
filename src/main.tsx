@@ -14,6 +14,11 @@ if ('serviceWorker' in navigator && import.meta.env.PROD && !isNative) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}))
 }
 
+if (import.meta.env.VITE_AUTOTEST === '1') {
+  // CI simulator/emulator builds only.
+  import('./lib/autotest').then((m) => setTimeout(m.runAutotest, 1500))
+}
+
 if (import.meta.env.DEV) {
   // Test hooks for local development only.
   import('./lib/devtools').then((m) => m.install())

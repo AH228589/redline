@@ -32,4 +32,6 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Step detector for running cadence -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
 </manifest>

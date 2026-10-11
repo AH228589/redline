@@ -69,7 +69,7 @@ export async function fillGaps(s: Streams, sport: Sport): Promise<{ streams: Str
     }
   }
   const n = s.time.length
-  const out: Streams = { time: [], lat: [], lon: [], ele: s.ele ? [] : null, hr: s.hr ? [] : null, cad: s.cad ? [] : null, pwr: s.pwr ? [] : null, dist: [], est: [...(s.est ?? [])] }
+  const out: Streams = { time: [], lat: [], lon: [], ele: s.ele ? [] : null, hr: s.hr ? [] : null, cad: s.cad ? [] : null, pwr: s.pwr ? [] : null, dist: [], est: [...(s.est ?? [])], cadUnit: s.cadUnit, eleSource: s.eleSource }
   const push = (t: number, lat: number, lon: number, ele: number, d: number, hr = NaN, cad = NaN, pwr = NaN) => {
     out.time.push(t)
     out.lat!.push(lat)

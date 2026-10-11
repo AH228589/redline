@@ -6,7 +6,7 @@ import { Icon } from '../components/Icon'
 import { Card, Empty, Medal, Seg, Sheet, SportIcon, Stat, Progress } from '../components/ui'
 import { activityToGpx, download, safeFile } from '../lib/importers'
 import { go } from '../lib/router'
-import { correctElevation } from '../lib/routing'
+import { alignToTerrain, correctElevation } from '../lib/routing'
 import { detectClimbs, segmentFromRange, type Climb } from '../lib/segments'
 import { fillGaps, findGaps } from '../lib/gaps'
 import { derive, DIVERGE, HEAT_RAMP, HR_ZONES, PACE_ZONES, percentile, POWER_ZONES, rampColor, ZONE_RAMP, zoneTimes, type Derived } from '../lib/series'
@@ -131,7 +131,7 @@ function ActivityBody({ a, s, loading }: { a: Activity; s: Streams | null; loadi
     if (!s) return
     setBusy('Fetching terrain elevation...')
     try {
-      const ele = await correctElevation(s)
+      const ele = s.eleSource === 'baro' ? await alignToTerrain(s) : await correctElevation(s)
       await replaceStreams(a.id, { ...s, ele })
       notify('Elevation corrected from terrain data')
     } catch (e) {
@@ -147,7 +147,7 @@ function ActivityBody({ a, s, loading }: { a: Activity; s: Streams | null; loadi
     const [i, j] = sel
     const cut = <T,>(arr: T[] | null) => (arr ? arr.slice(i, j + 1) : null)
     const base = s.dist[i]
-    await replaceStreams(a.id, { time: cut(s.time)!, lat: cut(s.lat), lon: cut(s.lon), ele: cut(s.ele), hr: cut(s.hr), cad: cut(s.cad), pwr: cut(s.pwr), dist: cut(s.dist)!.map((v) => v - base) })
+    await replaceStreams(a.id, { time: cut(s.time)!, lat: cut(s.lat), lon: cut(s.lon), ele: cut(s.ele), hr: cut(s.hr), cad: cut(s.cad), pwr: cut(s.pwr), dist: cut(s.dist)!.map((v) => v - base), cadUnit: s.cadUnit, eleSource: s.eleSource })
     await updateActivity(a.id, { start: s.time[i] })
     setSel(null)
     notify('Activity cropped')

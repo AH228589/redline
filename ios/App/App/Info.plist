@@ -10,7 +10,14 @@
 	<array>
 		<string>location</string>
 		<string>audio</string>
+		<string>bluetooth-central</string>
 	</array>
+	<key>NSMotionUsageDescription</key>
+	<string>Redline uses motion data to measure your running cadence and steps.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Redline connects to Bluetooth heart rate monitors.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
   <key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
 	<key>CFBundleDevelopmentRegion</key>

@@ -247,7 +247,7 @@ function normaliseCadence(cad: number[] | null, sport: Sport) {
 }
 
 export function analyze(s: Streams, sport: Sport, weight = 72): Summary {
-  s.cad = normaliseCadence(s.cad, sport)
+  if (s.cadUnit !== 'spm') s.cad = normaliseCadence(s.cad, sport)
   const n = s.time.length
   const group = sportGroup(sport)
   const elapsedTime = n > 1 ? (s.time[n - 1] - s.time[0]) / 1000 : 0

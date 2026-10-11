@@ -9,7 +9,7 @@ import { effortProfile } from './segments'
 import type { Route, Segment, Sport, Streams } from './types'
 import { fmtDuration, unitLen } from './units'
 import { interp } from './geo'
-import { askNotificationPermission, isNative, nativeSpeak, nativeStop, nativeWatch } from './native'
+import { askNotificationPermission, isNative, motionStart, nativeConnectHr, nativeSpeak, nativeStop, nativeWatch, type MotionEvent } from './native'
 
 export type RecState = 'idle' | 'recording' | 'paused' | 'autopaused'
 
@@ -58,11 +58,12 @@ export interface LiveStats {
   segmentDone: SegmentResult | null
   route: { remaining: number; off: boolean; offBy: number } | null
   points: number
+  cadence: number | null
 }
 
 const initial = (sport: Sport): LiveStats => ({
   state: 'idle', sport, startedAt: null, elapsed: 0, moving: 0, distance: 0, speed: 0, avgSpeed: 0, ele: null, gain: 0,
-  hr: null, splits: [], segment: null, segmentDone: null, route: null, points: 0,
+  hr: null, splits: [], segment: null, segmentDone: null, route: null, points: 0, cadence: null,
 })
 
 export const gps = signal<Fix | null>(null)
@@ -82,6 +83,29 @@ let movingMs = 0
 let lastTick = 0
 let gain = 0
 let eleAnchor: number | null = null
+// Phone sensors (installed app only).
+let cadNow: { v: number; t: number } | null = null
+let baroRel: number | null = null // metres relative to where the barometer started
+let baroBase: number | null = null // absolute level the barometer track hangs from
+let baroResumeBase: number | null = null
+let stopMotion: (() => void) | null = null
+
+/** Counters for diagnosing background delivery (shown nowhere, read by tests). */
+export const debugStats = { fixes: 0, hiddenFixes: 0, maxLagMs: 0 }
+
+function onMotion(e: MotionEvent) {
+  if (e.type === 'steps') {
+    if (e.cadence != null && isFinite(e.cadence)) cadNow = { v: e.cadence, t: Date.now() }
+    return
+  }
+  if (baroBase == null) baroBase = baroResumeBase ?? gps.value?.alt ?? 0
+  baroRel = e.relativeAltitude
+}
+
+async function startSensors() {
+  stopMotion?.()
+  stopMotion = await motionStart(onMotion)
+}
 let splits: { distance: number; time: number }[] = []
 let lastAccepted: Fix | null = null
 let prevFix: Fix | null = null
@@ -168,6 +192,9 @@ export function onFix(f: Fix) {
   gpsError.value = null
   const L = live.value
   if (L.state === 'idle' || L.state === 'paused') return
+  debugStats.fixes++
+  if (document.visibilityState === 'hidden') debugStats.hiddenFixes++
+  debugStats.maxLagMs = Math.max(debugStats.maxLagMs, Date.now() - f.t)
   if (f.acc > 40) return
   const thr = SPORTS[L.sport].movingThreshold || 0.4
   const prev = prevFix
@@ -199,13 +226,16 @@ export function onFix(f: Fix) {
     dist += step
   }
   lastAccepted = f
-  const ele = f.alt ?? undefined
+  // The barometer is far steadier than GPS altitude, so prefer it when the phone has one.
+  const ele = baroRel != null ? (baroBase ?? 0) + baroRel : (f.alt ?? undefined)
+  const step = baroRel != null ? 1 : 4
   if (ele != null) {
     if (eleAnchor == null) eleAnchor = ele
-    else if (ele - eleAnchor >= 4) { gain += ele - eleAnchor; eleAnchor = ele }
-    else if (eleAnchor - ele >= 4) eleAnchor = ele
+    else if (ele - eleAnchor >= step) { gain += ele - eleAnchor; eleAnchor = ele }
+    else if (eleAnchor - ele >= step) eleAnchor = ele
   }
-  pts.push({ time: f.t, lat: f.lat, lon: f.lon, ele, hr: hrNow.value ?? undefined, dist })
+  const cad = sportGroup(L.sport) === 'foot' && cadNow && Date.now() - cadNow.t < 15000 ? cadNow.v : undefined
+  pts.push({ time: f.t, lat: f.lat, lon: f.lon, ele, hr: hrNow.value ?? undefined, cad, dist })
   checkSplit()
   checkRoute(f)
   checkSegments(f)
@@ -323,13 +353,14 @@ function refresh() {
     distance: dist,
     speed,
     avgSpeed: moving > 0 ? dist / moving : 0,
-    ele: lastAccepted?.alt ?? null,
+    ele: baroRel != null ? (baroBase ?? 0) + baroRel : (lastAccepted?.alt ?? null),
     gain,
     hr: hrNow.value,
     splits: splits.slice(),
     segment,
     segmentDone: segDone && now - segDone.at < 20000 ? segDone : null,
     points: pts.length,
+    cadence: sportGroup(L.sport) === 'foot' && cadNow && now - cadNow.t < 15000 ? cadNow.v : null,
   }
 }
 
@@ -395,6 +426,11 @@ export function start() {
   movingMs = 0
   gain = 0
   eleAnchor = null
+  cadNow = null
+  baroRel = null
+  baroBase = null
+  baroResumeBase = null
+  debugStats.fixes = debugStats.hiddenFixes = debugStats.maxLagMs = 0
   splits = []
   lastAccepted = null
   slowSince = null
@@ -412,6 +448,7 @@ export function start() {
     // Background mode: the OS keeps delivering fixes while the phone is locked.
     nativeWatch(true, onFix, nativeError)
     askNotificationPermission()
+    startSensors()
   } else lockScreen()
   speak('Recording started')
 }
@@ -441,7 +478,14 @@ export function finish(): Streams | null {
   wakeState.value = 'off'
   bgGap.value = null
   if (isNative) nativeWatch(false, onFix, nativeError)
+  stopMotion?.()
+  stopMotion = null
+  const usedBaro = baroRel != null
   const s = pts.length >= 2 ? buildStreams(pts) : null
+  if (s) {
+    if (isNative) s.cadUnit = 'spm'
+    s.eleSource = usedBaro ? 'baro' : 'gps'
+  }
   const sport = live.value.sport
   live.value = { ...initial(sport), route: live.value.route }
   db.kvDel('recording')
@@ -482,7 +526,14 @@ export function restore(r: SavedRecording) {
   segState = null
   lastTick = performance.now()
   live.value = { ...initial(r.sport), state: 'paused', startedAt: r.startedAt }
-  if (isNative) nativeWatch(true, onFix, nativeError)
+  baroRel = null
+  baroBase = null
+  // Continue the barometric profile from where the interrupted recording left off.
+  baroResumeBase = [...r.pts].reverse().find((p) => p.ele != null)?.ele ?? null
+  if (isNative) {
+    nativeWatch(true, onFix, nativeError)
+    startSensors()
+  }
   clearInterval(tickTimer)
   tickTimer = window.setInterval(tick, 1000)
   clearInterval(saveTimer)
@@ -507,8 +558,18 @@ export function trackParts() {
   return { solid: solid.filter((l) => l.length > 1), gaps, first: pts.find((p) => p.lon != null) }
 }
 
-// ---------- heart rate strap over Web Bluetooth ----------
+// ---------- heart rate strap: OS Bluetooth in the app, Web Bluetooth on the website ----------
 export async function connectHr() {
+  if (isNative) {
+    hrDevice.value = await nativeConnectHr(
+      (bpm) => (hrNow.value = bpm),
+      () => {
+        hrDevice.value = null
+        hrNow.value = null
+      },
+    )
+    return
+  }
   const bt = (navigator as Navigator & { bluetooth?: { requestDevice: (o: unknown) => Promise<BtDevice> } }).bluetooth
   if (!bt) throw new Error('Bluetooth is not available in this browser. Chrome on Android or desktop supports it.')
   const dev = await bt.requestDevice({ filters: [{ services: ['heart_rate'] }] })

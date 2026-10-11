@@ -138,6 +138,19 @@ export async function correctElevation(s: Streams): Promise<number[]> {
   return out
 }
 
+/**
+ * Barometric elevation has the right shape but an unknown starting level.
+ * Shift it so it sits on the terrain model, keeping every bump the barometer saw.
+ */
+export async function alignToTerrain(s: Streams): Promise<number[]> {
+  const dem = await correctElevation(s)
+  if (!s.ele) return dem
+  const diffs = s.ele.map((e, i) => dem[i] - e).filter((d) => isFinite(d)).sort((a, b) => a - b)
+  if (!diffs.length) return dem
+  const offset = diffs[Math.floor(diffs.length / 2)]
+  return s.ele.map((e, i) => (isFinite(e) ? e + offset : dem[i]))
+}
+
 export async function elevationFor(points: LonLat[]): Promise<number[]> {
   const out: number[] = []
   for (let k = 0; k < points.length; k += 100) {

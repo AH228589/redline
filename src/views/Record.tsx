@@ -6,14 +6,14 @@ import { beaconId, beaconLink, beaconViewers, startBeacon, stopBeacon } from '..
 import { buildManual } from '../lib/importers'
 import * as rec from '../lib/recorder'
 import { back, go } from '../lib/router'
-import { correctElevation } from '../lib/routing'
+import { alignToTerrain, correctElevation } from '../lib/routing'
 import { isNative, nativePlatform, openAppSettings } from '../lib/native'
 import { GetAppNotice } from '../components/GetApp'
 import { fillGaps, findGaps } from '../lib/gaps'
 import { defaultName, SPORT_LIST, SPORTS, usesPace } from '../lib/sports'
 import { addActivity, buildActivity, gear, notify, replaceStreams, routes, settings, saveSettings } from '../lib/store'
 import type { Route, Sport, Streams } from '../lib/types'
-import { distNum, distUnit, fmtDist, fmtDuration, fmtPace, fmtSpeed, speedUnit } from '../lib/units'
+import { distNum, distUnit, fmtDist, fmtDuration, fmtElev, fmtPace, fmtSpeed, speedUnit } from '../lib/units'
 
 let sportPicked = false
 
@@ -252,6 +252,25 @@ export function RecordView() {
                 </>
               )}
             </div>
+            {!noGps && (L.cadence != null || L.gain >= 1 || (L.hr != null && L.state !== 'idle')) && (
+              <div class="row small ink2" style={{ justifyContent: 'center', gap: '1.25rem' }}>
+                {L.cadence != null && (
+                  <span>
+                    <b class="num">{Math.round(L.cadence)}</b> spm
+                  </span>
+                )}
+                {L.gain >= 1 && (
+                  <span>
+                    <b class="num">+{fmtElev(L.gain)}</b>
+                  </span>
+                )}
+                {L.hr != null && L.cadence != null && (
+                  <span>
+                    <b class="num">{L.hr}</b> bpm
+                  </span>
+                )}
+              </div>
+            )}
             {L.route && !L.route.off && <div class="small ink2" style={{ textAlign: 'center' }}>{fmtDist(L.route.remaining)} to go on {route?.name}</div>}
             <div class="rec-controls">
               {!noGps && !isNative && (
@@ -504,8 +523,9 @@ function SaveSheet({ data, sport: initialSport, onDone }: { data: { streams: Str
       id = act.id
       // Phone altitude is noisy; swap in terrain elevation when online.
       const done = s
+      // GPS altitude is replaced by terrain data; barometer data is only shifted onto it.
       if (done.lat && navigator.onLine)
-        correctElevation(done)
+        (done.eleSource === 'baro' ? alignToTerrain(done) : correctElevation(done))
           .then((ele) => replaceStreams(id, { ...done, ele }))
           .catch(() => {})
     } else {

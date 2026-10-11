@@ -129,3 +129,50 @@ export function openExternal(url: string) {
   if (isNative) window.location.href = url
   else window.open(url, '_blank', 'noopener')
 }
+
+// ---------- phone sensors (cadence, steps, barometer) ----------
+export type MotionEvent =
+  | { type: 'steps'; steps: number; cadence?: number; t: number }
+  | { type: 'altitude'; relativeAltitude: number; pressure: number; t: number }
+
+interface MotionPluginApi {
+  available(): Promise<{ steps: boolean; cadence: boolean; barometer: boolean }>
+  start(): Promise<void>
+  stop(): Promise<void>
+  addListener(ev: 'motion', cb: (e: MotionEvent) => void): Promise<{ remove: () => Promise<void> }>
+}
+
+const Motion = registerPlugin<MotionPluginApi>('Motion')
+
+/** Start the phone's step counter and barometer. Returns a stop function. */
+export async function motionStart(onEvent: (e: MotionEvent) => void): Promise<() => void> {
+  if (!isNative) return () => {}
+  try {
+    const handle = await Motion.addListener('motion', onEvent)
+    await Motion.start()
+    return () => {
+      Motion.stop().catch(() => {})
+      handle.remove().catch(() => {})
+    }
+  } catch {
+    return () => {}
+  }
+}
+
+export const motionAvailable = () => (isNative ? Motion.available().catch(() => null) : Promise.resolve(null))
+
+// ---------- Bluetooth heart rate straps ----------
+/** Connect a standard BLE heart rate monitor through the OS Bluetooth stack. */
+export async function nativeConnectHr(onHr: (bpm: number) => void, onDisconnect: () => void): Promise<string> {
+  const { BleClient, numberToUUID } = await import('@capacitor-community/bluetooth-le')
+  const HR = numberToUUID(0x180d)
+  const MEASUREMENT = numberToUUID(0x2a37)
+  await BleClient.initialize()
+  const dev = await BleClient.requestDevice({ services: [HR] })
+  await BleClient.connect(dev.deviceId, () => onDisconnect())
+  await BleClient.startNotifications(dev.deviceId, HR, MEASUREMENT, (dv) => {
+    const flags = dv.getUint8(0)
+    onHr(flags & 1 ? dv.getUint16(1, true) : dv.getUint8(1))
+  })
+  return dev.name || 'Heart rate monitor'
+}
