@@ -54,10 +54,7 @@ jobs:
       # Older published apps live in public/; keep them out of the new package.
       - run: rm -f public/redline.apk public/redline.ipa
       - run: npm run build
-      # The iPhone app loads the site over https (WebKit blocks workers on capacitor://).
       - run: npx cap sync ios
-        env:
-          CAP_SERVER_URL: https://redline-two-mu.vercel.app
       - name: Build unsigned app
         run: |
           VERSION=$(node -p "require('./package.json').version")

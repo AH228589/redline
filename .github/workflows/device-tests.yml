@@ -18,7 +18,7 @@ on:
         description: Where the iPhone app loads its web layer from
         type: choice
         options: [server, bundled]
-        default: server
+        default: bundled
       probe:
         description: Only run the minimal worker probe page inside the app
         type: boolean
@@ -62,7 +62,6 @@ jobs:
       - name: Allow the local test server in the app
         run: |
           P=ios/App/App/Info.plist
-          /usr/libexec/PlistBuddy -c "Add :WKAppBoundDomains: string localhost" "$P"
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$P"
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$P"
       - name: Pick an iPhone simulator

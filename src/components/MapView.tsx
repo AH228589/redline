@@ -1,9 +1,8 @@
 import type { ComponentChildren } from 'preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Map as MLMap, Marker, StyleSpecification, LngLatBoundsLike, GeoJSONSource } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { settings } from '../lib/store'
-import { isNative } from '../lib/native'
 import type { Settings } from '../lib/types'
 
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
@@ -12,25 +11,10 @@ type ML = typeof import('maplibre-gl')
 let mlp: Promise<ML> | null = null
 // Point MapLibre at its worker explicitly; bundlers move the file it would look for.
 const loadML = () =>
-  (mlp ??= Promise.all([import('maplibre-gl'), workerSource()]).then(([ml, url]) => {
-    ml.setWorkerUrl(url)
+  (mlp ??= import('maplibre-gl').then((ml) => {
+    ml.setWorkerUrl(workerUrl)
     return ml
   }))
-
-/**
- * The iOS app's file server sends .mjs files as application/octet-stream, which
- * WebKit refuses to run as a module worker. Inside the app, hand MapLibre a blob
- * with the right type instead.
- */
-async function workerSource() {
-  if (!isNative) return workerUrl
-  try {
-    const code = await (await fetch(workerUrl)).text()
-    return URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))
-  } catch {
-    return workerUrl
-  }
-}
 
 export interface MapLine {
   id: string
@@ -125,6 +109,7 @@ export function MapView(props: Props) {
   const hoverM = useRef<Marker | null>(null)
   const lineIds = useRef(new Set<string>())
   const propsRef = useRef(props)
+  const [failed, setFailed] = useState(false)
   const fittedKey = useRef<string | null>(null)
   const userMoved = useRef(0)
   propsRef.current = props
@@ -136,19 +121,27 @@ export function MapView(props: Props) {
       if (dead || !box.current) return
       mlRef.current = ml
       const p = propsRef.current
-      const map = new ml.Map({
-        container: box.current,
-        style: styleFor(styleKey),
-        center: p.initialCenter ?? [0, 20],
-        zoom: p.initialZoom ?? 1.5,
-        attributionControl: { compact: true },
-        // Phones report 3x density; 2x looks the same on a map and needs far less GPU memory.
-        pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
-        dragRotate: true,
-        maxPitch: 75,
-        // Maps embedded in a scrolling page should not swallow the scroll.
-        cooperativeGestures: !(p.class || '').includes('fill'),
-      })
+      let map: MLMap
+      try {
+        map = new ml.Map({
+          container: box.current,
+          style: styleFor(styleKey),
+          center: p.initialCenter ?? [0, 20],
+          zoom: p.initialZoom ?? 1.5,
+          attributionControl: { compact: true },
+          // Phones report 3x density; 2x looks the same on a map and needs far less GPU memory.
+          pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+          dragRotate: true,
+          maxPitch: 75,
+          // Maps embedded in a scrolling page should not swallow the scroll.
+          cooperativeGestures: !(p.class || '').includes('fill'),
+        })
+      } catch (e) {
+        // No WebGL (very old phone, or a sandbox without a GPU): show a note, keep the page working.
+        console.warn('map unavailable', e)
+        setFailed(true)
+        return
+      }
       map.addControl(new ml.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right')
       mapRef.current = map
       if (import.meta.env.VITE_AUTOTEST === '1') {
@@ -355,6 +348,11 @@ export function MapView(props: Props) {
   return (
     <div class={`map ${props.class || ''}`}>
       <div ref={box} style={{ position: 'absolute', inset: 0 }} />
+      {failed && (
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', padding: '1rem', textAlign: 'center', color: 'var(--muted)', fontSize: '0.875rem' }}>
+          The map can't be shown on this device. Everything else, including recording, still works.
+        </div>
+      )}
       {props.children}
     </div>
   )

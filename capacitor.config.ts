@@ -1,11 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
-// The iPhone app loads Redline from its https address: WebKit will not start
-// web workers (which the map needs) on the app's own capacitor:// origin.
-// CAP_SERVER_URL is set when syncing iOS (and by device tests, to a local server).
+// Device tests can point the app at a web server instead of the bundled files.
 const remote = process.env.CAP_SERVER_URL
-const PUBLIC_HOST = 'redline-two-mu.vercel.app'
-const appBound = !!remote && new URL(remote).hostname === PUBLIC_HOST
 
 const config: CapacitorConfig = {
   appId: 'dev.ahristov.redline',
@@ -18,9 +14,6 @@ const config: CapacitorConfig = {
   },
   ios: {
     contentInset: 'never',
-    // App-bound domains let the web view run the service worker, so the app
-    // still opens without signal after the first launch.
-    limitsNavigationsToAppBoundDomains: appBound,
   },
 }
 

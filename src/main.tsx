@@ -18,8 +18,8 @@ loadAll().then(async () => {
 })
 checkForUpdate().then(() => mark('checkForUpdate'))
 
-// The website and the iPhone app (which loads the site over https) use the service
-// worker for offline starts. The Android app ships its files inside the package.
+// The website uses the service worker for offline starts; the apps ship their
+// files inside the package (Android serves them from https://localhost).
 if ('serviceWorker' in navigator && import.meta.env.PROD && location.protocol === 'https:' && location.hostname !== 'localhost') {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}))
 }
