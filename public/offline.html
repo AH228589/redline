@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Redline</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d0d0d; color: #fff; font: 1rem/1.5 system-ui, -apple-system, sans-serif; }
+  main { min-height: 100%; display: grid; place-items: center; text-align: center; padding: 2rem 1.5rem; box-sizing: border-box; }
+  .mark { width: 4rem; height: 4rem; border-radius: 1rem; background: #d7263d; display: grid; place-items: center; margin: 0 auto 1.25rem; }
+  p { color: #c3c2b7; max-width: 22rem; margin: 0.5rem auto 1.5rem; }
+  button { font: inherit; font-weight: 700; color: #fff; background: #d7263d; border: 0; border-radius: 999rem; padding: 0.85rem 1.75rem; }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <div class="mark">
+      <svg viewBox="0 0 24 24" width="2.2rem" height="2.2rem" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 4-7 5 5" /></svg>
+    </div>
+    <h2 style="margin: 0">No connection</h2>
+    <p>Redline needs the internet the first time it opens. After that it works offline. Connect and try again.</p>
+    <button onclick="location.href = 'https://redline-two-mu.vercel.app/'">Try again</button>
+  </div>
+</main>
+</body>
+</html>

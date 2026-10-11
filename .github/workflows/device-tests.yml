@@ -39,7 +39,22 @@ jobs:
       - run: npm ci
       - run: rm -f public/redline.apk public/redline.ipa
       - run: npm run build
+      # Like the release app, load the web layer over http(s), here from a local server
+      # with the autotest build, and let the app reach it.
+      - name: Serve the test build
+        run: |
+          nohup npx vite preview --host localhost --port 4173 --strictPort > preview.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:4173/ > /dev/null && break; sleep 1; done
+          curl -sI http://localhost:4173/ | head -1
       - run: npx cap sync ios
+        env:
+          CAP_SERVER_URL: http://localhost:4173
+      - name: Allow the local test server in the app
+        run: |
+          P=ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :WKAppBoundDomains: string localhost" "$P"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$P"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$P"
       - name: Pick an iPhone simulator
         run: |
           # Newest iOS runtime, then the newest iPhone in it.

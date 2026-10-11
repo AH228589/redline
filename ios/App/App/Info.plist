@@ -16,6 +16,10 @@
 	<string>Redline uses motion data to measure your running cadence and steps.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Redline connects to Bluetooth heart rate monitors.</string>
+	<key>WKAppBoundDomains</key>
+	<array>
+		<string>redline-two-mu.vercel.app</string>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
   <key>CAPACITOR_DEBUG</key>

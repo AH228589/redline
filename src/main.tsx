@@ -13,8 +13,9 @@ loadAll().then(async () => {
 })
 checkForUpdate()
 
-// The installed app ships its files inside the package, so only the website needs the service worker.
-if ('serviceWorker' in navigator && import.meta.env.PROD && !isNative) {
+// The website and the iPhone app (which loads the site over https) use the service
+// worker for offline starts. The Android app ships its files inside the package.
+if ('serviceWorker' in navigator && import.meta.env.PROD && location.protocol === 'https:' && location.hostname !== 'localhost') {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}))
 }
 
