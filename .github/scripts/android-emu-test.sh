@@ -19,7 +19,8 @@ node -e "
   for(let i=1;i<w.length;i++){const n=Math.round(h(w[i-1],w[i])/3);for(let k=0;k<n;k++)out.push([w[i-1][0]+(w[i][0]-w[i-1][0])*k/n,w[i-1][1]+(w[i][1]-w[i-1][1])*k/n])}
   require('fs').writeFileSync('out/route.txt',out.map(p=>p[0].toFixed(6)+' '+p[1].toFixed(6)).join('\n'))
 "
-( while read -r lon lat; do adb emu geo fix "$lon" "$lat" > /dev/null; sleep 1; done < out/route.txt ) &
+# adb must not read the loop's stdin, or it swallows the route after a few lines.
+( while read -r lon lat; do adb emu geo fix "$lon" "$lat" < /dev/null > /dev/null; sleep 1; done < out/route.txt ) &
 FEED=$!
 sleep 5
 adb shell am start -n $PKG/.MainActivity

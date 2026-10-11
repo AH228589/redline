@@ -126,6 +126,8 @@ export function MapView(props: Props) {
         center: p.initialCenter ?? [0, 20],
         zoom: p.initialZoom ?? 1.5,
         attributionControl: { compact: true },
+        // Phones report 3x density; 2x looks the same on a map and needs far less GPU memory.
+        pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
         dragRotate: true,
         maxPitch: 75,
         // Maps embedded in a scrolling page should not swallow the scroll.

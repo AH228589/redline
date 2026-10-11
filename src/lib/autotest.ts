@@ -2,7 +2,7 @@
 // Only bundled when the app is built with VITE_AUTOTEST=1; never in releases.
 import * as rec from './recorder'
 import { go } from './router'
-import { addActivity, buildActivity, ready } from './store'
+import { activities, addActivity, buildActivity, ready } from './store'
 
 const log = (tag: string, data?: unknown) => console.log(`[AUTOTEST] ${tag}${data === undefined ? '' : ` ${JSON.stringify(data)}`}`)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -16,17 +16,29 @@ async function until(cond: () => boolean, ms: number) {
 export async function runAutotest() {
   const duration = Number(import.meta.env.VITE_AUTOTEST_SECONDS || 240) * 1000
   await until(() => ready.value, 20000)
-  log('boot', { ua: navigator.userAgent })
-  go('/record')
-  if (!(await until(() => !!rec.gps.value, 120000))) {
-    log('result', { ok: false, reason: 'no GPS fix', error: rec.gpsError.value })
+  log('boot', { ua: navigator.userAgent, state: rec.live.value.state })
+  if (activities.value.some((a) => a.name === 'Autotest run')) {
+    log('done already')
     return
   }
-  log('fix', rec.gps.value)
-  rec.setSport('run')
-  rec.start()
-  const t0 = Date.now()
-  log('started')
+  await sleep(1500) // give autoResume a moment
+  let t0: number
+  if (rec.live.value.state !== 'idle' && rec.live.value.startedAt) {
+    // The web layer was restarted mid-run and the recording resumed itself.
+    t0 = rec.live.value.startedAt
+    log('resumed', { pts: rec.live.value.points, km: +(rec.live.value.distance / 1000).toFixed(3) })
+  } else {
+    go('/record')
+    if (!(await until(() => !!rec.gps.value, 120000))) {
+      log('result', { ok: false, reason: 'no GPS fix', error: rec.gpsError.value })
+      return
+    }
+    log('fix', rec.gps.value)
+    rec.setSport('run')
+    rec.start()
+    t0 = Date.now()
+    log('started')
+  }
   const timer = setInterval(() => {
     const L = rec.live.value
     log('tick', { s: Math.round((Date.now() - t0) / 1000), state: L.state, pts: L.points, km: +(L.distance / 1000).toFixed(3), vis: document.visibilityState, cad: L.cadence, ...rec.debugStats })

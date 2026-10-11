@@ -397,6 +397,8 @@ interface WakeLock {
 
 let hiddenAt: number | null = null
 document.addEventListener('visibilitychange', () => {
+  // Save straight away: a backgrounded page may be killed without warning.
+  if (document.visibilityState === 'hidden' && live.value.state !== 'idle') persist()
   if (live.value.state === 'idle' || isNative) return
   if (document.visibilityState === 'hidden') {
     hiddenAt = Date.now()
@@ -443,7 +445,7 @@ export function start() {
   clearInterval(tickTimer)
   tickTimer = window.setInterval(tick, 1000)
   clearInterval(saveTimer)
-  saveTimer = window.setInterval(persist, 15000)
+  saveTimer = window.setInterval(persist, 5000)
   if (isNative) {
     // Background mode: the OS keeps delivering fixes while the phone is locked.
     nativeWatch(true, onFix, nativeError)
@@ -499,7 +501,7 @@ export function timedSummary() {
 
 async function persist() {
   if (live.value.state === 'idle') return
-  await db.kvSet('recording', { pts, dist, movingMs, gain, splits, sport: live.value.sport, startedAt: live.value.startedAt, savedAt: Date.now() })
+  await db.kvSet('recording', { pts, dist, movingMs, gain, splits, sport: live.value.sport, startedAt: live.value.startedAt, savedAt: Date.now(), state: live.value.state, routeId: route?.r.id ?? null })
 }
 
 export interface SavedRecording {
@@ -511,21 +513,42 @@ export interface SavedRecording {
   sport: Sport
   startedAt: number
   savedAt: number
+  state?: RecState
+  routeId?: string | null
 }
 
 export const pendingRecording = () => db.kvGet<SavedRecording>('recording')
 
+/**
+ * If the app was killed in the middle of a run (the OS can drop the web layer to
+ * free memory), pick the recording straight back up. Returns true when resumed.
+ */
+export async function autoResume(routes: Route[]): Promise<boolean> {
+  if (live.value.state !== 'idle') return false
+  const r = await pendingRecording()
+  if (!r || !r.state || r.state === 'idle') return false
+  if (Date.now() - r.savedAt > 30 * 60 * 1000) return false // old: let the user decide
+  const active = r.state === 'recording' || r.state === 'autopaused'
+  // Time between the last save and now was spent moving if the run was active.
+  restore({ ...r, movingMs: r.movingMs + (active ? Math.max(0, Date.now() - r.savedAt) : 0) }, active ? 'recording' : 'paused')
+  const rt = r.routeId ? routes.find((x) => x.id === r.routeId) : null
+  if (rt) followRoute(rt)
+  return true
+}
+
 /** Resume a recording interrupted by a reload or crash. */
-export function restore(r: SavedRecording) {
+export function restore(r: SavedRecording, resumeState: RecState = 'paused') {
   pts = r.pts
   dist = r.dist
   movingMs = r.movingMs
   gain = r.gain
   splits = r.splits
-  lastAccepted = null
+  // After a crash the runner kept moving: count the stretch from the last saved point.
+  const lp = resumeState !== 'paused' ? [...r.pts].reverse().find((p) => p.lat != null && p.lon != null) : undefined
+  lastAccepted = lp ? { lat: lp.lat!, lon: lp.lon!, acc: 10, alt: lp.ele ?? null, speed: null, heading: null, t: lp.time } : null
   segState = null
   lastTick = performance.now()
-  live.value = { ...initial(r.sport), state: 'paused', startedAt: r.startedAt }
+  live.value = { ...initial(r.sport), state: resumeState, startedAt: r.startedAt }
   baroRel = null
   baroBase = null
   // Continue the barometric profile from where the interrupted recording left off.
@@ -537,7 +560,7 @@ export function restore(r: SavedRecording) {
   clearInterval(tickTimer)
   tickTimer = window.setInterval(tick, 1000)
   clearInterval(saveTimer)
-  saveTimer = window.setInterval(persist, 15000)
+  saveTimer = window.setInterval(persist, 5000)
   refresh()
 }
 

@@ -56,6 +56,14 @@ export function RecordView() {
   if (here) points.push({ id: 'me', coord: here, kind: 'me' })
   if (parts.first) points.push({ id: 'start', coord: [parts.first.lon!, parts.first.lat!], kind: 'start' })
   const [pocket, setPocket] = useState(false)
+  // Drop the map while the app is in the background: it frees GPU memory, which
+  // makes the OS much less likely to kill the app mid-run. Recording is unaffected.
+  const [visible, setVisible] = useState(document.visibilityState === 'visible')
+  useEffect(() => {
+    const on = () => setVisible(document.visibilityState === 'visible')
+    document.addEventListener('visibilitychange', on)
+    return () => document.removeEventListener('visibilitychange', on)
+  }, [])
   const gapNote = rec.bgGap.value
 
   const acc = fix?.acc ?? null
@@ -94,7 +102,7 @@ export function RecordView() {
   return (
     <div class="rec-screen">
       <div class="rec-map">
-        {!noGps || recording ? (
+        {!visible ? null : !noGps || recording ? (
           <MapView lines={lines} points={points} follow={here} initialCenter={here ?? undefined} initialZoom={here ? 15 : 2} class="fill" fitTo={!recording && route ? route.geometry.map((c) => [c[0], c[1]] as [number, number]) : null} fitKey={route?.id}>
             <div class="gps-pill">
               {!recording && (
