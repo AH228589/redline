@@ -8,6 +8,7 @@ import { activityToGpx, download, safeFile } from '../lib/importers'
 import { go } from '../lib/router'
 import { correctElevation } from '../lib/routing'
 import { detectClimbs, segmentFromRange, type Climb } from '../lib/segments'
+import { fillGaps, findGaps } from '../lib/gaps'
 import { derive, DIVERGE, HEAT_RAMP, HR_ZONES, PACE_ZONES, percentile, POWER_ZONES, rampColor, ZONE_RAMP, zoneTimes, type Derived } from '../lib/series'
 import { SPORT_LIST, SPORTS, sportGroup, usesPace } from '../lib/sports'
 import { activities, addSegment, deleteActivity, efforts, gear, getStreams, notify, replaceStreams, segments, settings, uid, updateActivity } from '../lib/store'
@@ -65,6 +66,7 @@ function ActivityBody({ a, s, loading }: { a: Activity; s: Streams | null; loadi
     .filter((x) => x.seg)
     .sort((x, y) => x.e.startIdx - y.e.startIdx)
   const climbs = useMemo(() => (s ? detectClimbs(s) : []), [s])
+  const gaps = useMemo(() => (s ? findGaps(s) : []), [s])
   const matched = useMemo(() => matchedActivities(a, all), [a, all])
 
   // Gradient colouring of the route line.
@@ -98,6 +100,9 @@ function ActivityBody({ a, s, loading }: { a: Activity; s: Streams | null; loadi
     lines.push({ id: 'main', coords, color: cssVar('--accent'), width: 4, gradient: gradient?.stops })
     if (focus) lines.push({ id: 'focus', coords: coords.slice(focus.a, focus.b + 1), color: cssVar('--s1'), width: 6 })
     if (sel) lines.push({ id: 'sel', coords: coords.slice(sel[0], sel[1] + 1), color: '#0b0b0b', width: 6 })
+    // Stretches traced along roads after a GPS dropout get a dashed white centre line.
+    ;(s?.est ?? []).forEach(([i, j], k) => lines.push({ id: `est${k}`, coords: coords.slice(i, j + 1), color: '#ffffff', width: 2, dash: true, casing: false, opacity: 0.9 }))
+    gaps.forEach((g, k) => lines.push({ id: `gap${k}`, coords: [coords[g.a], coords[g.b]], color: '#ffffff', width: 2, dash: true, casing: false, opacity: 0.9 }))
   }
   const points: MapPoint[] = hasMap
     ? [
@@ -107,6 +112,20 @@ function ActivityBody({ a, s, loading }: { a: Activity; s: Streams | null; loadi
     : []
   const hv = hover.value
   const hoverLL = hv != null && s?.lat && s.lon && hv < s.lat.length ? ([s.lon[hv], s.lat[hv]] as [number, number]) : null
+
+  async function fixGaps() {
+    if (!s) return
+    setBusy('Tracing gaps along roads and trails...')
+    try {
+      const r = await fillGaps(s, a.sport)
+      if (r.filled) await replaceStreams(a.id, r.streams)
+      notify(r.filled ? `Filled ${r.filled} gap${r.filled > 1 ? 's' : ''} along roads${r.failed ? `, ${r.failed} could not be routed` : ''}` : 'No route found for the gaps')
+    } catch (e) {
+      notify((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
 
   async function fixElevation() {
     if (!s) return
@@ -162,6 +181,18 @@ function ActivityBody({ a, s, loading }: { a: Activity; s: Streams | null; loadi
       </div>
 
       <Highlights a={a} ranks={ranks} segs={myEfforts.filter((x) => x.rank <= 3).map((x) => ({ name: x.seg!.name, rank: x.rank }))} />
+
+      {gaps.length > 0 && (
+        <div class="notice" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <Icon name="info" />
+          <div class="grow">
+            GPS dropped out {gaps.length === 1 ? 'once' : `${gaps.length} times`} on this activity ({fmtDist(gaps.reduce((t, g) => t + g.dist, 0))} drawn as a straight dashed line), usually because the phone screen was locked.
+          </div>
+          <button class="btn sm primary" disabled={!!busy} onClick={fixGaps}>
+            <Icon name="route" size={0.9} /> Trace along roads
+          </button>
+        </div>
+      )}
 
       <div class="split-layout">
         <div class="stack">
@@ -297,6 +328,11 @@ function ActivityBody({ a, s, loading }: { a: Activity; s: Streams | null; loadi
 
           <Card title="Tools" icon="settings">
             <div class="col" style={{ gap: '0.5rem' }}>
+              {gaps.length > 0 && (
+                <button class="btn block" disabled={!!busy} onClick={fixGaps}>
+                  <Icon name="route" size={1} /> Trace {gaps.length} GPS gap{gaps.length > 1 ? 's' : ''} along roads
+                </button>
+              )}
               {s?.lat && (
                 <button class="btn block" disabled={!!busy} onClick={fixElevation}>
                   <Icon name="mountain" size={1} /> Correct elevation from terrain

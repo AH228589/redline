@@ -25,6 +25,7 @@ export interface Streams {
   cad: number[] | null
   pwr: number[] | null
   dist: number[] // cumulative metres
+  est?: [number, number][] | null // index ranges filled in by routing, not measured
 }
 
 export interface Split {

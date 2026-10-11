@@ -106,7 +106,9 @@ export function movingMask(s: Streams, sport: Sport) {
     if (dt <= 0) continue
     if (!hasDist || thr === 0) { mask[i] = dt < 300 ? 1 : 0; continue }
     const v = (s.dist[i] - s.dist[i - 1]) / dt
-    mask[i] = v >= thr && dt < 300 ? 1 : 0
+    // A long silence that still covers ground at moving speed is a GPS dropout
+    // (screen locked), not a rest, so it counts toward moving time.
+    mask[i] = v >= thr && dt < 1800 ? 1 : 0
   }
   // Bridge single stopped samples between moving ones (GPS jitter at low speeds).
   for (let i = 2; i < n; i++) if (!mask[i - 1] && mask[i - 2] && mask[i]) {

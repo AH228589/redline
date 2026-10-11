@@ -69,6 +69,10 @@ export const gpsError = signal<string | null>(null)
 export const live = signal<LiveStats>(initial('run'))
 export const hrNow = signal<number | null>(null)
 export const hrDevice = signal<string | null>(null)
+/** Whether the screen is being kept awake: 'on', 'off' (lost, e.g. phone locked) or 'unsupported'. */
+export const wakeState = signal<'on' | 'off' | 'unsupported'>('off')
+/** Set when the page comes back after GPS was cut off in the background. */
+export const bgGap = signal<{ seconds: number; at: number } | null>(null)
 
 // ---------- recording state ----------
 let pts: RawPoint[] = []
@@ -83,7 +87,7 @@ let prevFix: Fix | null = null
 let watchId: number | null = null
 let tickTimer = 0
 let saveTimer = 0
-let wakeLock: { release: () => Promise<void> } | null = null
+let wakeLock: WakeLock | null = null
 let slowSince: number | null = null
 let route: { r: Route; cum: number[]; total: number; offCount: number; off: boolean } | null = null
 let segState: { seg: Segment; startDist: number; startT: number; startIdx: number; pr: number | null; ghost: { dist: number[]; time: number[] } | null; strays: number } | null = null
@@ -321,15 +325,39 @@ function tick() {
 
 async function lockScreen() {
   try {
-    const nav = navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<{ release: () => Promise<void> }> } }
-    if (nav.wakeLock && document.visibilityState === 'visible') wakeLock = await nav.wakeLock.request('screen')
+    const nav = navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<WakeLock> } }
+    if (!nav.wakeLock) {
+      wakeState.value = 'unsupported'
+      return
+    }
+    if (document.visibilityState !== 'visible') return
+    wakeLock = await nav.wakeLock.request('screen')
+    wakeState.value = 'on'
+    wakeLock.addEventListener?.('release', () => {
+      if (live.value.state !== 'idle') wakeState.value = 'off'
+    })
   } catch {
     wakeLock = null
+    wakeState.value = 'off'
   }
 }
 
+interface WakeLock {
+  release: () => Promise<void>
+  addEventListener?: (t: 'release', cb: () => void) => void
+}
+
+let hiddenAt: number | null = null
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && live.value.state !== 'idle') lockScreen()
+  if (live.value.state === 'idle') return
+  if (document.visibilityState === 'hidden') {
+    hiddenAt = Date.now()
+    return
+  }
+  lockScreen()
+  // Browsers stop location updates while the page is hidden; tell the user what happened.
+  if (hiddenAt && Date.now() - hiddenAt > 15000) bgGap.value = { seconds: (Date.now() - hiddenAt) / 1000, at: Date.now() }
+  hiddenAt = null
 })
 
 // ---------- public controls ----------
@@ -389,6 +417,8 @@ export function finish(): Streams | null {
   clearInterval(saveTimer)
   wakeLock?.release().catch(() => {})
   wakeLock = null
+  wakeState.value = 'off'
+  bgGap.value = null
   const s = pts.length >= 2 ? buildStreams(pts) : null
   const sport = live.value.sport
   live.value = { ...initial(sport), route: live.value.route }
@@ -437,7 +467,22 @@ export function restore(r: SavedRecording) {
   refresh()
 }
 
-export const trackLine = (): [number, number][] => pts.filter((p) => p.lon != null).map((p) => [p.lon!, p.lat!])
+/** The live track split where GPS dropped out, plus straight connectors across each gap. */
+export function trackParts() {
+  const solid: [number, number][][] = [[]]
+  const gaps: [number, number][][] = []
+  let prev: RawPoint | null = null
+  for (const p of pts) {
+    if (p.lon == null || p.lat == null) continue
+    if (prev && p.time - prev.time > 25000 && haversine(prev.lat!, prev.lon!, p.lat, p.lon) > 120) {
+      gaps.push([[prev.lon!, prev.lat!], [p.lon, p.lat]])
+      solid.push([])
+    }
+    solid[solid.length - 1].push([p.lon, p.lat])
+    prev = p
+  }
+  return { solid: solid.filter((l) => l.length > 1), gaps, first: pts.find((p) => p.lon != null) }
+}
 
 // ---------- heart rate strap over Web Bluetooth ----------
 export async function connectHr() {

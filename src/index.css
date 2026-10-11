@@ -1200,6 +1200,62 @@ textarea.input {
   color: var(--accent);
 }
 
+/* ---------- pocket mode ---------- */
+.pocket {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: #000;
+  color: #5c5c5c;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  justify-items: center;
+  padding: 2rem 1rem calc(2rem + env(safe-area-inset-bottom));
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.pocket-stats {
+  align-self: center;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.1rem;
+}
+.pocket-time {
+  font-size: 4rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #6e6e6e;
+}
+.pocket-state {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.pocket-unlock {
+  position: relative;
+  width: 5rem;
+  height: 5rem;
+  border: 0;
+  border-radius: 50%;
+  background: #0d0d0d;
+  color: #777;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+}
+.pocket-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.pocket-hint {
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+}
+
 /* ---------- calendar log ---------- */
 .cal {
   display: grid;

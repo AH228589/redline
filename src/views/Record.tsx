@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { MapView, cssVar, type MapLine, type MapPoint } from '../components/MapView'
 import { Icon } from '../components/Icon'
 import { Sheet, SportIcon, Switch } from '../components/ui'
@@ -7,6 +7,7 @@ import { buildManual } from '../lib/importers'
 import * as rec from '../lib/recorder'
 import { back, go } from '../lib/router'
 import { correctElevation } from '../lib/routing'
+import { fillGaps, findGaps } from '../lib/gaps'
 import { defaultName, SPORT_LIST, SPORTS, usesPace } from '../lib/sports'
 import { addActivity, buildActivity, gear, notify, replaceStreams, routes, settings, saveSettings } from '../lib/store'
 import type { Route, Sport, Streams } from '../lib/types'
@@ -43,14 +44,17 @@ export function RecordView() {
 
   const recording = L.state !== 'idle'
   const route = rec.followedRoute()
-  const track = recording ? rec.trackLine() : []
+  const parts = recording ? rec.trackParts() : { solid: [], gaps: [], first: undefined }
   const here: [number, number] | null = fix ? [fix.lon, fix.lat] : null
   const lines: MapLine[] = []
   if (route) lines.push({ id: 'route', coords: route.geometry, color: cssVar('--s1'), width: 5, opacity: 0.75 })
-  if (track.length > 1) lines.push({ id: 'track', coords: track, color: cssVar('--accent'), width: 5 })
+  parts.solid.forEach((l, i) => lines.push({ id: `track${i}`, coords: l, color: cssVar('--accent'), width: 5 }))
+  parts.gaps.forEach((l, i) => lines.push({ id: `gap${i}`, coords: l, color: cssVar('--accent'), width: 3, dash: true, casing: false, opacity: 0.7 }))
   const points: MapPoint[] = []
   if (here) points.push({ id: 'me', coord: here, kind: 'me' })
-  if (track.length) points.push({ id: 'start', coord: track[0], kind: 'start' })
+  if (parts.first) points.push({ id: 'start', coord: [parts.first.lon!, parts.first.lat!], kind: 'start' })
+  const [pocket, setPocket] = useState(false)
+  const gapNote = rec.bgGap.value
 
   const acc = fix?.acc ?? null
   const fresh = !!fix && Date.now() - fix.t < 30000
@@ -69,6 +73,12 @@ export function RecordView() {
       }
     }
     rec.start()
+  }
+
+  function enterPocket() {
+    // Fullscreen must be requested straight from the tap.
+    document.documentElement.requestFullscreen?.().catch(() => {})
+    setPocket(true)
   }
 
   function end() {
@@ -200,6 +210,23 @@ export function RecordView() {
 
         {recording ? (
           <>
+            {gapNote && (
+              <div class="notice" style={{ background: 'var(--accent-soft)', color: 'var(--ink)' }}>
+                <Icon name="info" />
+                <div class="grow">
+                  Location stopped for {fmtDuration(gapNote.seconds)} while the screen was off. That stretch will be traced along roads when you save. Next time use <b>Pocket mode</b> instead of locking the phone.
+                </div>
+                <button class="btn ghost icon sm" aria-label="Dismiss" onClick={() => (rec.bgGap.value = null)}>
+                  <Icon name="x" size={1} />
+                </button>
+              </div>
+            )}
+            {!gapNote && rec.wakeState.value !== 'on' && !noGps && (
+              <div class="notice">
+                <Icon name="info" />
+                <div>This browser may let the screen turn off, which stops GPS. Use Pocket mode, or set your phone's auto-lock to Never while recording.</div>
+              </div>
+            )}
             {L.state !== 'recording' && <div class="state-pill">{L.state === 'autopaused' ? 'Auto-paused' : 'Paused'}</div>}
             <div class="rec-stats">
               <div class="main-stat">
@@ -225,6 +252,11 @@ export function RecordView() {
             </div>
             {L.route && !L.route.off && <div class="small ink2" style={{ textAlign: 'center' }}>{fmtDist(L.route.remaining)} to go on {route?.name}</div>}
             <div class="rec-controls">
+              {!noGps && (
+                <button class="round-btn small" onClick={enterPocket} aria-label="Pocket mode" title="Pocket mode">
+                  <Icon name="eye" size={1.3} />
+                </button>
+              )}
               {L.state === 'recording' || L.state === 'autopaused' ? (
                 <button class="round-btn secondary" onClick={rec.pause} aria-label="Pause">
                   <Icon name="pause" size={1.75} fill />
@@ -273,9 +305,14 @@ export function RecordView() {
               </button>
             </div>
             {!noGps && !gpsWeak && <div class="small muted" style={{ textAlign: 'center' }}>{rec.gpsError.value ?? 'Waiting for a GPS fix. Head outside with a clear view of the sky.'}</div>}
-            <div class="tiny muted" style={{ textAlign: 'center' }}>
-              Keep this screen open while recording. Phones pause web apps in the background, so the screen is kept awake for you.
-            </div>
+            {!noGps && (
+              <div class="notice">
+                <Icon name="info" />
+                <div>
+                  <b>Don't lock the phone while recording.</b> Browsers stop getting your location when the screen is off. Put it in your pocket with <b>Pocket mode</b> (the eye button) instead: a black screen that keeps GPS running.
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -354,7 +391,59 @@ export function RecordView() {
         </Sheet>
       )}
 
+      {pocket && recording && <PocketMode onExit={() => setPocket(false)} />}
+
       {finished && <SaveSheet data={finished} sport={L.sport} onDone={() => setFinished(null)} />}
+    </div>
+  )
+}
+
+/** Black, touch-proof screen for the pocket. The page stays visible, so GPS keeps flowing. */
+function PocketMode({ onExit }: { onExit: () => void }) {
+  const L = rec.live.value
+  const [hold, setHold] = useState(0)
+  const timer = useRef(0)
+  useEffect(
+    () => () => {
+      clearInterval(timer.current)
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+    },
+    [],
+  )
+  const startHold = () => {
+    const t0 = performance.now()
+    clearInterval(timer.current)
+    timer.current = window.setInterval(() => {
+      const f = (performance.now() - t0) / 1000
+      setHold(Math.min(1, f))
+      if (f >= 1) {
+        clearInterval(timer.current)
+        onExit()
+      }
+    }, 30)
+  }
+  const stopHold = () => {
+    clearInterval(timer.current)
+    setHold(0)
+  }
+  const pace = usesPace(L.sport)
+  return (
+    <div class="pocket" onContextMenu={(e) => e.preventDefault()}>
+      <div class="pocket-stats">
+        <div class="pocket-time">{fmtDuration(L.moving)}</div>
+        <div>
+          {fmtDist(L.distance)} · {pace ? fmtPace(L.speed) : fmtSpeed(L.speed)}
+        </div>
+        <div class="pocket-state">{L.state === 'recording' ? 'Recording' : L.state === 'autopaused' ? 'Auto-paused' : 'Paused'}</div>
+      </div>
+      <button class="pocket-unlock" onPointerDown={startHold} onPointerUp={stopHold} onPointerLeave={stopHold} onPointerCancel={stopHold} aria-label="Hold to unlock">
+        <svg viewBox="0 0 100 100" class="pocket-ring">
+          <circle cx="50" cy="50" r="44" fill="none" stroke="#262626" stroke-width="6" />
+          <circle cx="50" cy="50" r="44" fill="none" stroke="#777" stroke-width="6" stroke-dasharray={`${276.5 * hold} 276.5`} transform="rotate(-90 50 50)" />
+        </svg>
+        <Icon name="x" size={1.4} />
+      </button>
+      <div class="pocket-hint">Hold to unlock</div>
     </div>
   )
 }
@@ -384,19 +473,34 @@ function SaveSheet({ data, sport: initialSport, onDone }: { data: { streams: Str
   const [rpe, setRpe] = useState(0)
   const [gearId, setGearId] = useState(gear.value.find((g) => !g.retired && g.defaultFor.includes(initialSport))?.id ?? '')
   const [saving, setSaving] = useState(false)
+  const [status, setStatus] = useState<string | null>(null)
   const s = data.streams
+  const gapCount = s ? findGaps(s).length : 0
 
   async function save() {
     setSaving(true)
     let id: string
+    let s = data.streams
+    // Trace any stretch where the phone stopped reporting location along roads.
+    if (s?.lat && findGaps(s).length && navigator.onLine) {
+      setStatus('Tracing GPS gaps along roads...')
+      try {
+        const r = await fillGaps(s, sport)
+        s = r.streams
+        if (r.filled) notify(`Filled ${r.filled} GPS gap${r.filled > 1 ? 's' : ''} along roads`)
+      } catch {
+        /* keep the straight line */
+      }
+    }
     if (s && s.dist[s.dist.length - 1] > 20) {
       const act = buildActivity(s, sport, name.trim() || defaultName(sport, data.started), { description: desc, rpe: rpe || null, gearId: gearId || null, source: 'recorded' })
       await addActivity(act, s)
       id = act.id
       // Phone altitude is noisy; swap in terrain elevation when online.
-      if (s.lat && navigator.onLine)
-        correctElevation(s)
-          .then((ele) => replaceStreams(id, { ...s, ele }))
+      const done = s
+      if (done.lat && navigator.onLine)
+        correctElevation(done)
+          .then((ele) => replaceStreams(id, { ...done, ele }))
           .catch(() => {})
     } else {
       const act = buildManual({ sport, name: name.trim() || defaultName(sport, data.started), start: data.started, time: data.moving, distance: s ? s.dist[s.dist.length - 1] : 0, gain: 0, rpe: rpe || null, description: desc })
@@ -463,6 +567,15 @@ function SaveSheet({ data, sport: initialSport, onDone }: { data: { streams: Str
             </select>
           </label>
         )}
+        {gapCount > 0 && !status && (
+          <div class="notice">
+            <Icon name="route" />
+            <div>
+              GPS dropped out {gapCount === 1 ? 'once' : `${gapCount} times`}. {gapCount === 1 ? 'That stretch' : 'Those stretches'} will be traced along roads and trails when you save, instead of a straight line.
+            </div>
+          </div>
+        )}
+        {status && <div class="small muted">{status}</div>}
         <button class="btn primary lg block" disabled={saving} onClick={save}>
           Save activity
         </button>
