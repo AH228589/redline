@@ -23,6 +23,13 @@ for attempt in 1 2 3; do
   echo "== launch attempt $attempt did not load, retrying"; cat out/console.log | head -5
   sleep 10
 done
+if [ "${VITE_AUTOTEST_PROBE:-0}" = "1" ]; then
+  sleep 40
+  xcrun simctl io "$UDID" screenshot out/1-probe.png
+  grep "PROBE\|probe-nav\|WebView" out/console.log | head -10
+  grep -q '\[PROBE\]' out/console.log
+  exit $?
+fi
 if [ "${VITE_AUTOTEST_QUICK:-0}" = "1" ]; then
   sleep 45
   xcrun simctl io "$UDID" screenshot out/1-record.png

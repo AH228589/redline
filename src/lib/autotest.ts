@@ -59,6 +59,12 @@ async function workerDiagnostics() {
 export async function runAutotest() {
   const duration = Number(import.meta.env.VITE_AUTOTEST_SECONDS || 240) * 1000
   await until(() => ready.value, 20000)
+  if (import.meta.env.VITE_AUTOTEST_PROBE === '1') {
+    // Load the minimal worker probe page on this same origin, in a fresh document.
+    log('probe-nav', { origin: location.origin })
+    location.href = '/probe.html'
+    return
+  }
   await workerDiagnostics().catch((e) => log('workers', { error: String(e) }))
   if (import.meta.env.VITE_AUTOTEST_QUICK === '1') {
     // Quick mode: open the record screen, check the map, stop.

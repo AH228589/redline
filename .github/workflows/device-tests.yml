@@ -14,11 +14,21 @@ on:
         description: Quick check (map and workers only, no background run)
         type: boolean
         default: false
+      ios_web:
+        description: Where the iPhone app loads its web layer from
+        type: choice
+        options: [server, bundled]
+        default: server
+      probe:
+        description: Only run the minimal worker probe page inside the app
+        type: boolean
+        default: false
 
 env:
   VITE_AUTOTEST: '1'
   VITE_AUTOTEST_SECONDS: '240'
   VITE_AUTOTEST_QUICK: ${{ inputs.quick && '1' || '0' }}
+  VITE_AUTOTEST_PROBE: ${{ inputs.probe && '1' || '0' }}
 
 jobs:
   ios:
@@ -48,7 +58,7 @@ jobs:
           curl -sI http://localhost:4173/ | head -1
       - run: npx cap sync ios
         env:
-          CAP_SERVER_URL: http://localhost:4173
+          CAP_SERVER_URL: ${{ inputs.ios_web == 'server' && 'http://localhost:4173' || '' }}
       - name: Allow the local test server in the app
         run: |
           P=ios/App/App/Info.plist
