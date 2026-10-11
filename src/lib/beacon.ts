@@ -1,6 +1,7 @@
 import type Peer from 'peerjs'
 import type { DataConnection } from 'peerjs'
 import { signal } from '@preact/signals'
+import { isNative, PUBLIC_URL } from './native'
 
 const loadPeer = () => import('peerjs').then((m) => m.default)
 
@@ -28,7 +29,8 @@ let hello: Omit<Extract<BeaconMsg, { type: 'hello' }>, 'history'> | null = null
 export const beaconId = signal<string | null>(null)
 export const beaconViewers = signal(0)
 
-export const beaconLink = (id: string) => `${location.origin}${location.pathname}#/beacon/${id}`
+// From the app, links must point at the public site, not the app's local origin.
+export const beaconLink = (id: string) => (isNative ? `${PUBLIC_URL}#/beacon/${id}` : `${location.origin}${location.pathname}#/beacon/${id}`)
 
 export async function startBeacon(name: string, sport: string, started: number): Promise<string> {
   stopBeacon(false)

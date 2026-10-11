@@ -1,6 +1,7 @@
 import { useEffect } from 'preact/hooks'
 import { Icon, Logo } from './components/Icon'
 import { ImportSheet } from './components/ImportSheet'
+import { UpdateBanner } from './components/GetApp'
 import { ManualSheet } from './components/ManualSheet'
 import { route } from './lib/router'
 import { showImport, showManual } from './lib/uiState'
@@ -121,7 +122,10 @@ export function App() {
             </button>
           </header>
         )}
-        <main class={`main ${full ? 'full' : ''}`}>{view}</main>
+        <main class={`main ${full ? 'full' : ''}`}>
+          {!full && <UpdateBanner />}
+          {view}
+        </main>
       </div>
       {!full && (
         <nav class="bottomnav" aria-label="Main">

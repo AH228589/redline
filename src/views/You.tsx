@@ -10,6 +10,8 @@ import { detectedMaxHr, estimateFtp, estimateThresholdPace, totals } from '../li
 import type { Gear, Goal, Sport } from '../lib/types'
 import { distNum, distUnit, elevUnit, fmtDist, fmtDuration, fmtHours, FOOT, unitLen } from '../lib/units'
 import { goalValueFmt } from './Home'
+import { GetAppNotice } from '../components/GetApp'
+import { APP_VERSION, isNative } from '../lib/native'
 
 function NumField({ label, value, onSave, suffix, placeholder }: { label: string; value: number | null; onSave: (v: number | null) => void; suffix?: string; placeholder?: string }) {
   const [v, setV] = useState(value == null ? '' : String(value))
@@ -78,6 +80,8 @@ export function YouView() {
           <Icon name="star" fill size={0.85} /> Everything unlocked
         </span>
       </div>
+
+      <GetAppNotice compact />
 
       <div class="grid2">
         <Card title="Profile" icon="user">
@@ -230,8 +234,9 @@ export function YouView() {
 
       <Card title="Your data" icon="file">
         <div class="col">
+          {isNative && <p class="tiny muted">Redline app {APP_VERSION}</p>}
           <p class="small ink2">
-            Everything is stored in this browser on this device. Nothing is uploaded anywhere. Export a backup now and then, and import it to move to another device.
+            Everything is stored {isNative ? 'in the app' : 'in this browser'} on this device. Nothing is uploaded anywhere. Export a backup now and then, and import it to move to another device.
             {storage && ` Using ${(storage.used / 1048576).toFixed(1)} MB.`}
           </p>
           <div class="row wrap">
@@ -239,7 +244,7 @@ export function YouView() {
               class="btn"
               onClick={async () => {
                 const data = await exportBackup()
-                download(`redline-backup-${new Date().toISOString().slice(0, 10)}.json.gz`, data as BlobPart, 'application/gzip')
+                download(`redline-backup-${new Date().toISOString().slice(0, 10)}.json.gz`, data, 'application/gzip')
               }}
             >
               <Icon name="download" size={1} /> Export backup

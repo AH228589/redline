@@ -9,6 +9,7 @@ import { effortProfile } from './segments'
 import type { Route, Segment, Sport, Streams } from './types'
 import { fmtDuration, unitLen } from './units'
 import { interp } from './geo'
+import { askNotificationPermission, isNative, nativeSpeak, nativeStop, nativeWatch } from './native'
 
 export type RecState = 'idle' | 'recording' | 'paused' | 'autopaused'
 
@@ -95,7 +96,13 @@ let segDone: SegmentResult | null = null
 let recentSegs = new Map<string, number>() // segment id -> time it last finished, avoids instant re-trigger
 
 export function speak(text: string) {
-  if (!settings.value.voiceCues || !('speechSynthesis' in window)) return
+  if (!settings.value.voiceCues) return
+  // The app speaks through the OS so cues still play with the screen locked.
+  if (isNative) {
+    nativeSpeak(text).catch(() => {})
+    return
+  }
+  if (!('speechSynthesis' in window)) return
   try {
     const u = new SpeechSynthesisUtterance(text)
     u.rate = 1.05
@@ -120,7 +127,13 @@ function spokenDuration(sec: number) {
 }
 
 // ---------- GPS ----------
+const nativeError = (msg: string) => (gpsError.value = msg)
+
 export function startGps() {
+  if (isNative) {
+    nativeWatch(live.value.state !== 'idle', onFix, nativeError)
+    return
+  }
   if (watchId != null) return
   if (!('geolocation' in navigator)) {
     gpsError.value = 'This browser has no GPS access.'
@@ -141,6 +154,10 @@ export function startGps() {
 
 export function stopGps() {
   if (live.value.state !== 'idle') return
+  if (isNative) {
+    nativeStop()
+    return
+  }
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
   watchId = null
 }
@@ -349,7 +366,7 @@ interface WakeLock {
 
 let hiddenAt: number | null = null
 document.addEventListener('visibilitychange', () => {
-  if (live.value.state === 'idle') return
+  if (live.value.state === 'idle' || isNative) return
   if (document.visibilityState === 'hidden') {
     hiddenAt = Date.now()
     return
@@ -391,7 +408,11 @@ export function start() {
   tickTimer = window.setInterval(tick, 1000)
   clearInterval(saveTimer)
   saveTimer = window.setInterval(persist, 15000)
-  lockScreen()
+  if (isNative) {
+    // Background mode: the OS keeps delivering fixes while the phone is locked.
+    nativeWatch(true, onFix, nativeError)
+    askNotificationPermission()
+  } else lockScreen()
   speak('Recording started')
 }
 
@@ -419,6 +440,7 @@ export function finish(): Streams | null {
   wakeLock = null
   wakeState.value = 'off'
   bgGap.value = null
+  if (isNative) nativeWatch(false, onFix, nativeError)
   const s = pts.length >= 2 ? buildStreams(pts) : null
   const sport = live.value.sport
   live.value = { ...initial(sport), route: live.value.route }
@@ -460,6 +482,7 @@ export function restore(r: SavedRecording) {
   segState = null
   lastTick = performance.now()
   live.value = { ...initial(r.sport), state: 'paused', startedAt: r.startedAt }
+  if (isNative) nativeWatch(true, onFix, nativeError)
   clearInterval(tickTimer)
   tickTimer = window.setInterval(tick, 1000)
   clearInterval(saveTimer)

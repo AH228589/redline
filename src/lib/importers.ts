@@ -1,4 +1,5 @@
 import { gunzipSync, unzipSync } from 'fflate'
+import { isNative, nativeSave } from './native'
 import { buildStreams, type RawPoint } from './analyze'
 import { lineLength } from './geo'
 import { defaultName, sportFromText } from './sports'
@@ -358,8 +359,13 @@ ${pts.join('\n')}
 </trkseg></trk></gpx>`
 }
 
-export function download(name: string, data: BlobPart, type = 'application/gpx+xml') {
-  const url = URL.createObjectURL(new Blob([data], { type }))
+export function download(name: string, data: string | Uint8Array, type = 'application/gpx+xml') {
+  // Inside the installed app there is no download bar: hand the file to the share sheet.
+  if (isNative) {
+    nativeSave(name, data).catch(() => {})
+    return
+  }
+  const url = URL.createObjectURL(new Blob([data as BlobPart], { type }))
   const a = document.createElement('a')
   a.href = url
   a.download = name

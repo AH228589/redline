@@ -7,6 +7,8 @@ import { buildManual } from '../lib/importers'
 import * as rec from '../lib/recorder'
 import { back, go } from '../lib/router'
 import { correctElevation } from '../lib/routing'
+import { isNative, nativePlatform, openAppSettings } from '../lib/native'
+import { GetAppNotice } from '../components/GetApp'
 import { fillGaps, findGaps } from '../lib/gaps'
 import { defaultName, SPORT_LIST, SPORTS, usesPace } from '../lib/sports'
 import { addActivity, buildActivity, gear, notify, replaceStreams, routes, settings, saveSettings } from '../lib/store'
@@ -221,7 +223,7 @@ export function RecordView() {
                 </button>
               </div>
             )}
-            {!gapNote && rec.wakeState.value !== 'on' && !noGps && (
+            {!gapNote && !isNative && rec.wakeState.value !== 'on' && !noGps && (
               <div class="notice">
                 <Icon name="info" />
                 <div>This browser may let the screen turn off, which stops GPS. Use Pocket mode, or set your phone's auto-lock to Never while recording.</div>
@@ -252,7 +254,7 @@ export function RecordView() {
             </div>
             {L.route && !L.route.off && <div class="small ink2" style={{ textAlign: 'center' }}>{fmtDist(L.route.remaining)} to go on {route?.name}</div>}
             <div class="rec-controls">
-              {!noGps && (
+              {!noGps && !isNative && (
                 <button class="round-btn small" onClick={enterPocket} aria-label="Pocket mode" title="Pocket mode">
                   <Icon name="eye" size={1.3} />
                 </button>
@@ -305,13 +307,17 @@ export function RecordView() {
               </button>
             </div>
             {!noGps && !gpsWeak && <div class="small muted" style={{ textAlign: 'center' }}>{rec.gpsError.value ?? 'Waiting for a GPS fix. Head outside with a clear view of the sky.'}</div>}
-            {!noGps && (
+            {!noGps && isNative && (
               <div class="notice">
-                <Icon name="info" />
-                <div>
-                  <b>Don't lock the phone while recording.</b> Browsers stop getting your location when the screen is off. Put it in your pocket with <b>Pocket mode</b> (the eye button) instead: a black screen that keeps GPS running.
-                </div>
+                <Icon name="check" />
+                <div>You can lock your phone and put it away. Recording keeps going in the background{nativePlatform === 'android' ? ' with a notification' : ''}.</div>
               </div>
+            )}
+            {!noGps && <GetAppNotice />}
+            {isNative && rec.gpsError.value && (
+              <button class="btn sm" style={{ alignSelf: 'center' }} onClick={() => openAppSettings()}>
+                Open location settings
+              </button>
             )}
           </>
         )}

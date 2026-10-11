@@ -220,7 +220,7 @@ p {
   position: sticky;
   top: 0;
   z-index: 30;
-  height: var(--top-h);
+  height: calc(var(--top-h) + env(safe-area-inset-top));
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -812,6 +812,11 @@ textarea.input {
 .map-tools {
   position: absolute;
   top: 0.6rem;
+}
+.map.fill .map-tools {
+  top: calc(0.6rem + env(safe-area-inset-top));
+}
+.map-tools {
   right: 0.6rem;
   z-index: 5;
   display: flex;

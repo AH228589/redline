@@ -1,0 +1,107 @@
+# Builds the installable apps when a tag like app-v1.0.0 is pushed (or on demand),
+# then commits them to public/ so the website serves them:
+#   /redline.apk  Android, signed with android/app/redline-release.p12
+#   /redline.ipa  iPhone, unsigned; Sideloadly signs it with the user's Apple ID
+name: Apps
+
+on:
+  push:
+    tags: ['app-v*']
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      # Older published apps live in public/; keep them out of the new package.
+      - run: rm -f public/redline.apk public/redline.ipa
+      - run: npm run build
+      - run: npx cap sync android
+      - name: Build signed APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Use the newest Xcode on the runner
+        run: |
+          XC=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          echo "Using $XC"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - run: npm ci
+      # Older published apps live in public/; keep them out of the new package.
+      - run: rm -f public/redline.apk public/redline.ipa
+      - run: npm run build
+      - run: npx cap sync ios
+      - name: Build unsigned app
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          CODE=$(node -p "const [a,b,c]=require('./package.json').version.split('.').map(Number); a*10000+b*100+c")
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$CODE" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/App.app Payload/
+          zip -qry redline.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: redline.ipa
+          if-no-files-found: error
+
+  publish:
+    needs: [android, ios]
+    # Ship the Android app even if the iPhone build fails.
+    if: always() && needs.android.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Commit the apps to the website
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          cp out/android/app-release.apk public/redline.apk
+          IPA=""
+          if [ -f out/ios/redline.ipa ]; then cp out/ios/redline.ipa public/redline.ipa; IPA="redline.ipa"; fi
+          node -e "
+            const fs = require('fs')
+            const v = { version: '$VERSION', apk: 'redline.apk', builtAt: new Date().toISOString() }
+            if ('$IPA') v.ipa = '$IPA'
+            fs.writeFileSync('public/app-version.json', JSON.stringify(v, null, 2) + '\n')
+          "
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/redline.apk public/app-version.json
+          [ -n "$IPA" ] && git add public/redline.ipa
+          git commit -m "Publish Redline app $VERSION"
+          for i in 1 2 3; do git pull --rebase origin main && git push origin HEAD:main && exit 0; sleep 5; done
+          exit 1

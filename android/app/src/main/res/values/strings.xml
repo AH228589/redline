@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Redline</string>
+    <string name="title_activity_main">Redline</string>
+    <string name="package_name">dev.ahristov.redline</string>
+    <string name="custom_url_scheme">dev.ahristov.redline</string>
+    <string name="capacitor_background_geolocation_notification_channel_name">Recording</string>
+    <string name="capacitor_background_geolocation_notification_icon">drawable/ic_tracking</string>
+</resources>
