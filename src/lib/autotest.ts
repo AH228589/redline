@@ -39,7 +39,17 @@ export async function runAutotest() {
     t0 = Date.now()
     log('started')
   }
+  let mapChecked = false
   const timer = setInterval(() => {
+    const m = (window as unknown as { __map?: { loaded(): boolean; areTilesLoaded(): boolean; queryRenderedFeatures(): unknown[]; getZoom(): number } }).__map
+    if (!mapChecked && m && Date.now() - t0 > 20000 && document.visibilityState === 'visible') {
+      mapChecked = true
+      try {
+        log('map', { loaded: m.loaded(), tiles: m.areTilesLoaded(), features: m.queryRenderedFeatures().length, zoom: +m.getZoom().toFixed(1) })
+      } catch (e) {
+        log('map', { error: String(e) })
+      }
+    }
     const L = rec.live.value
     log('tick', { s: Math.round((Date.now() - t0) / 1000), state: L.state, pts: L.points, km: +(L.distance / 1000).toFixed(3), vis: document.visibilityState, cad: L.cadence, ...rec.debugStats })
   }, 5000)

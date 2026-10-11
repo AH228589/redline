@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'preact/hooks'
 import type { Map as MLMap, Marker, StyleSpecification, LngLatBoundsLike, GeoJSONSource } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { settings } from '../lib/store'
+import { isNative } from '../lib/native'
 import type { Settings } from '../lib/types'
 
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
@@ -11,10 +12,25 @@ type ML = typeof import('maplibre-gl')
 let mlp: Promise<ML> | null = null
 // Point MapLibre at its worker explicitly; bundlers move the file it would look for.
 const loadML = () =>
-  (mlp ??= import('maplibre-gl').then((ml) => {
-    ml.setWorkerUrl(workerUrl)
+  (mlp ??= Promise.all([import('maplibre-gl'), workerSource()]).then(([ml, url]) => {
+    ml.setWorkerUrl(url)
     return ml
   }))
+
+/**
+ * The iOS app's file server sends .mjs files as application/octet-stream, which
+ * WebKit refuses to run as a module worker. Inside the app, hand MapLibre a blob
+ * with the right type instead.
+ */
+async function workerSource() {
+  if (!isNative) return workerUrl
+  try {
+    const code = await (await fetch(workerUrl)).text()
+    return URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))
+  } catch {
+    return workerUrl
+  }
+}
 
 export interface MapLine {
   id: string
@@ -135,6 +151,10 @@ export function MapView(props: Props) {
       })
       map.addControl(new ml.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right')
       mapRef.current = map
+      if (import.meta.env.VITE_AUTOTEST === '1') {
+        ;(window as unknown as { __map: unknown }).__map = map
+        map.on('error', (e) => console.log(`[AUTOTEST] map-error ${JSON.stringify({ msg: String(e.error?.message ?? e.error) })}`))
+      }
       map.on('style.load', () => {
         readyRef.current = true
         lineIds.current.clear()
