@@ -27,5 +27,7 @@ xcrun simctl io "$UDID" screenshot out/3-back.png
 sleep 140
 xcrun simctl io "$UDID" screenshot out/4-result.png
 xcrun simctl location "$UDID" clear || true
-grep "\[AUTOTEST\]" out/console.log | tail -60
+echo "web layer restarts: $(grep -c 'WebView process terminated' out/console.log)"
+echo "map errors: $(grep -c 'map-error\|map-sync\|vertexBuffer' out/console.log)"
+grep "\[AUTOTEST\]" out/console.log | grep -v tick | tail -40
 grep -q '\[AUTOTEST\] result {"ok":true' out/console.log

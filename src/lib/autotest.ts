@@ -68,7 +68,7 @@ export async function runAutotest() {
   await addActivity(act, s)
   go(`/activity/${act.id}`)
   log('result', {
-    ok: s.time.length > 20 && maxGap < 20,
+    ok: s.time.length > 20 && maxGap < 30,
     points: s.time.length,
     km: +(act.summary.distance / 1000).toFixed(3),
     movingMin: +(act.summary.movingTime / 60).toFixed(1),

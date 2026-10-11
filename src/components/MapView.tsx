@@ -185,10 +185,27 @@ export function MapView(props: Props) {
     sync(false)
   })
 
+  // Map updates can race the style loading (fast re-renders, a style swap, a
+  // context loss). Never let that throw into the page; retry once the map settles.
+  const retrying = useRef(false)
   function sync(styleReloaded: boolean) {
     const map = mapRef.current
-    const ml = mlRef.current
-    if (!map || !ml || !readyRef.current) return
+    if (!map || !mlRef.current || !readyRef.current) return
+    try {
+      syncNow(map, mlRef.current, styleReloaded)
+    } catch (e) {
+      if (import.meta.env.VITE_AUTOTEST === '1') console.log(`[AUTOTEST] map-sync ${String(e)}`)
+      if (!retrying.current) {
+        retrying.current = true
+        map.once('idle', () => {
+          retrying.current = false
+          sync(true)
+        })
+      }
+    }
+  }
+
+  function syncNow(map: MLMap, ml: ML, styleReloaded: boolean) {
     const p = propsRef.current
 
     // Terrain
@@ -255,8 +272,10 @@ export function MapView(props: Props) {
       const sid = `l-${l.id}`
       const data = { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: l.coords.length >= 2 ? l.coords.map((c) => [c[0], c[1]]) : [] } }
       const src = map.getSource(sid) as GeoJSONSource | undefined
-      if (src) src.setData(data)
-      else {
+      if (src) {
+        src.setData(data)
+        lineIds.current.add(l.id)
+      } else {
         map.addSource(sid, { type: 'geojson', data, lineMetrics: true })
         if (l.casing !== false)
           map.addLayer({ id: `${sid}-case`, type: 'line', source: sid, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': (l.width ?? 4) + 3, 'line-opacity': 0.9 } })
