@@ -1,4 +1,4 @@
-import './lib/earlyprobe'
+import { mark } from './lib/earlyprobe'
 import { render } from 'preact'
 import './index.css'
 import { App } from './app'
@@ -8,11 +8,15 @@ import { go } from './lib/router'
 import { checkForUpdate, isNative, nativePlatform } from './lib/native'
 
 if (isNative) document.documentElement.classList.add('native', nativePlatform)
+mark('modules')
 render(<App />, document.getElementById('app')!)
+mark('render')
 loadAll().then(async () => {
+  mark('loadAll')
   if (await autoResume(routes.value)) go('/record', true)
+  mark('autoResume')
 })
-checkForUpdate()
+checkForUpdate().then(() => mark('checkForUpdate'))
 
 // The website and the iPhone app (which loads the site over https) use the service
 // worker for offline starts. The Android app ships its files inside the package.

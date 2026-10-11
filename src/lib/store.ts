@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals'
 import * as db from './db'
+import { mark } from './earlyprobe'
 import { analyze, makeTrace } from './analyze'
 import type { Activity, Gear, Goal, Route, Segment, SegmentEffort, Settings, Sport, Streams } from './types'
 import { matchActivity } from './segments'
@@ -65,7 +66,7 @@ export async function loadAll() {
   goals.value = gl || DEFAULT_GOALS
   gear.value = gr || []
   ready.value = true
-  db.persist()
+  db.persist().then(() => mark('persist'))
 }
 
 // ---------- streams cache ----------
